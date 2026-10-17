@@ -1,764 +1,724 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📊 DataYab — Ultimate Dataset Analyzer</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #10b981;
-            --secondary: #1e293b;
-            --light: #f1f5f9;
-            --border: #e2e8f0;
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-        }
-
-        * {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-
-        body {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e0e7ff 100%);
-            min-height: 100vh;
-            padding: 20px 0;
-        }
-
-        .sidebar {
-            background: var(--secondary);
-            color: white;
-            border-radius: 12px;
-            padding: 25px;
-            height: fit-content;
-            position: sticky;
-            top: 20px;
-        }
-
-        .sidebar h4 {
-            border-bottom: 2px solid var(--primary);
-            padding-bottom: 15px;
-            margin-bottom: 20px;
-            font-weight: 700;
-            color: var(--primary);
-        }
-
-        .sidebar .nav-link {
-            color: #cbd5e1;
-            border-left: 3px solid transparent;
-            padding: 12px 16px;
-            margin: 8px 0;
-            border-radius: 6px;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .sidebar .nav-link:hover, .sidebar .nav-link.active {
-            background: var(--primary);
-            color: white;
-            border-left-color: white;
-        }
-
-        .main-content {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
-            min-height: 600px;
-        }
-
-        .section {
-            display: none;
-        }
-
-        .section.active {
-            display: block;
-            animation: fadeIn 0.3s;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .card {
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            transition: all 0.3s;
-            margin-bottom: 20px;
-        }
-
-        .card:hover {
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-            transform: translateY(-2px);
-        }
-
-        .card-header {
-            background: linear-gradient(135deg, var(--primary) 0%, #059669 100%);
-            color: white;
-            border-radius: 10px 10px 0 0;
-            font-weight: 600;
-            border: none;
-        }
-
-        .btn-primary {
-            background: var(--primary);
-            border: none;
-            border-radius: 8px;
-            padding: 10px 24px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .btn-primary:hover {
-            background: #059669;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-        }
-
-        .btn-outline-primary {
-            border: 1px solid var(--primary);
-            color: var(--primary);
-        }
-
-        .btn-outline-primary:hover {
-            background: var(--primary);
-            color: white;
-        }
-
-        .alert {
-            border-radius: 8px;
-            border: none;
-        }
-
-        .form-control, .form-select {
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            padding: 10px 14px;
-        }
-
-        .form-control:focus, .form-select:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-        }
-
-        .header {
-            background: linear-gradient(135deg, var(--secondary) 0%, #334155 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin: 0;
-        }
-
-        .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-            margin: 10px 0 0 0;
-        }
-
-        .upload-area {
-            border: 3px dashed var(--primary);
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .upload-area:hover {
-            background: rgba(16, 185, 129, 0.05);
-            border-color: #059669;
-        }
-
-        .upload-area.dragover {
-            background: rgba(16, 185, 129, 0.1);
-            border-color: #059669;
-        }
-
-        .table-responsive {
-            border-radius: 10px;
-            overflow: auto;
-            max-height: 400px;
-        }
-
-        table {
-            font-size: 0.85rem;
-        }
-
-        thead {
-            background: var(--light);
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-        }
-
-        tbody tr:hover {
-            background: #f9fafb;
-        }
-
-        .chart-container {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-            text-align: center;
-        }
-
-        .chart-container img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 4px solid var(--border);
-            border-top-color: var(--primary);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .badge-status {
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-
-        .badge-success {
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--success);
-        }
-
-        .badge-warning {
-            background: rgba(245, 158, 11, 0.1);
-            color: var(--warning);
-        }
-
-        .badge-danger {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
-        }
-
-        .insights-list {
-            list-style: none;
-            padding: 0;
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .insights-list li {
-            padding: 12px;
-            margin: 8px 0;
-            background: var(--light);
-            border-left: 4px solid var(--primary);
-            border-radius: 6px;
-            font-size: 0.9rem;
-        }
-
-        .health-score {
-            text-align: center;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-
-        .health-score.A { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
-        .health-score.B { background: linear-gradient(135deg, #84cc16, #65a30d); color: white; }
-        .health-score.C { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
-        .health-score.D { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
-        .health-score.F { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
-
-        .health-score h2 { font-size: 3rem; font-weight: bold; margin: 0; }
-        .health-score p { margin: 0; font-size: 1.1rem; opacity: 0.9; }
-
-        .modal-content {
-            border-radius: 12px;
-        }
-
-        .slider-value {
-            display: inline-block;
-            background: var(--primary);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            margin-left: 10px;
-        }
-
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                margin-bottom: 20px;
-            }
-
-            .header h1 {
-                font-size: 1.8rem;
-            }
-        }
-    </style>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DataYab | Dataset workbench</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
     <div class="container-fluid">
-        <div class="row">
-            <!-- Sidebar -->
-            <div class="col-lg-3">
-                <div class="sidebar">
-                    <h4><i class="fas fa-bars"></i> Menu</h4>
-                    <div class="nav-link active" data-section="upload"><i class="fas fa-upload"></i> Upload Data</div>
-                    <div class="nav-link" data-section="explore"><i class="fas fa-search"></i> Explore</div>
-                    <div class="nav-link" data-section="clean"><i class="fas fa-broom"></i> Clean Data</div>
-                    <div class="nav-link" data-section="feature"><i class="fas fa-filter"></i> Feature Selection</div>
-                    <div class="nav-link" data-section="train"><i class="fas fa-brain"></i> Train Model</div>
-                    <div class="nav-link" data-section="evaluate"><i class="fas fa-chart-bar"></i> Evaluate</div>
-                    <div class="nav-link" data-section="predict"><i class="fas fa-crystal-ball"></i> Predict</div>
-                    <div class="nav-link" data-section="insights"><i class="fas fa-lightbulb"></i> Insights</div>
-                    <hr style="border-top: 1px solid #475569; margin: 20px 0;">
-                    <div id="status" style="font-size: 0.9rem; color: #cbd5e1;">
-                        <span class="badge badge-warning">No data loaded</span>
-                    </div>
-                    <div id="modelStatus" style="font-size: 0.8rem; margin-top: 10px;"></div>
-                </div>
+      <div class="row">
+        <!-- Sidebar -->
+        <div class="col-lg-3">
+          <nav class="sidebar" aria-label="Workbench sections">
+            <h4>WORKSPACE</h4>
+            <button
+              type="button"
+              class="nav-link active"
+              data-section="upload"
+              aria-current="page"
+            >
+              Upload Data
+            </button>
+            <button type="button" class="nav-link" data-section="explore">
+              Explore
+            </button>
+            <button type="button" class="nav-link" data-section="clean">
+              Clean Data
+            </button>
+            <button type="button" class="nav-link" data-section="feature">
+              Feature Selection
+            </button>
+            <button type="button" class="nav-link" data-section="train">
+              Train Model
+            </button>
+            <button type="button" class="nav-link" data-section="evaluate">
+              Evaluate
+            </button>
+            <button type="button" class="nav-link" data-section="predict">
+              Predict
+            </button>
+            <button type="button" class="nav-link" data-section="insights">
+              Insights
+            </button>
+            <hr style="border-top: 1px solid #475569; margin: 20px 0" />
+            <div id="status" style="font-size: 0.9rem; color: #cbd5e1">
+              <span class="badge badge-warning">No data loaded</span>
             </div>
-
-            <!-- Main Content -->
-            <div class="col-lg-9">
-                <div class="header">
-                    <h1><i class="fas fa-chart-pie"></i> DataYab</h1>
-                    <p>Ultimate Dataset Analyzer — Upload, Explore, Train, Predict</p>
-                </div>
-
-                <!-- ==================== UPLOAD SECTION ==================== -->
-                <div class="section active" id="upload">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-upload"></i> Upload Dataset
-                        </div>
-                        <div class="card-body">
-                            <div class="upload-area" id="uploadArea">
-                                <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; color: var(--primary); margin-bottom: 15px;"></i>
-                                <p style="font-size: 1.1rem; margin: 15px 0;">Drag & drop your file here</p>
-                                <p style="color: #666;">or <strong>click to browse</strong></p>
-                                <small style="color: #999;">CSV, Excel, JSON, Parquet (Max 500MB)</small>
-                                <input type="file" id="fileInput" style="display: none;">
-                            </div>
-                            <div id="uploadResult" style="margin-top: 20px;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== EXPLORE SECTION ==================== -->
-                <div class="section" id="explore">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-eye"></i> Data Preview
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-sm" id="previewTable">
-                                    <thead></thead>
-                                    <tbody></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-chart-line"></i> Generate Charts
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">Chart Type</label>
-                                    <select class="form-select" id="chartType">
-                                        <option value="correlation">Correlation Heatmap</option>
-                                        <option value="missing">Missing Values Map</option>
-                                        <option value="histogram">Histogram</option>
-                                        <option value="target">Target Distribution</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Column (for histogram)</label>
-                                    <select class="form-select" id="chartColumn"></select>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary" onclick="generateExploreChart()">
-                                <i class="fas fa-chart-bar"></i> Generate Chart
-                            </button>
-                            <div class="chart-container" id="chartContainer" style="display: none;">
-                                <img id="chartImage" src="" alt="Chart">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== CLEAN SECTION ==================== -->
-                <div class="section" id="clean">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-magic"></i> Data Cleaning
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('auto_clean')">
-                                        <i class="fas fa-wand-magic"></i> Auto Clean
-                                    </button>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('remove_missing')">
-                                        <i class="fas fa-trash"></i> Remove Missing
-                                    </button>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('remove_duplicates')">
-                                        <i class="fas fa-copy"></i> Remove Duplicates
-                                    </button>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('remove_outliers')">
-                                        <i class="fas fa-chart-line"></i> Remove Outliers
-                                    </button>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('encode_categorical')">
-                                        <i class="fas fa-tag"></i> Encode Categorical
-                                    </button>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <button class="btn btn-primary w-100" onclick="cleanData('remove_constant')">
-                                        <i class="fas fa-minus-circle"></i> Remove Constant
-                                    </button>
-                                </div>
-                            </div>
-                            <div id="cleanResult" style="margin-top: 20px;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== FEATURE SELECTION SECTION ==================== -->
-                <div class="section" id="feature">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-filter"></i> Feature Selection
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <button class="btn btn-outline-primary w-100" onclick="getRFImportance()">
-                                        🌲 Random Forest Importance
-                                    </button>
-                                </div>
-                                <div class="col-md-6">
-                                    <button class="btn btn-outline-primary w-100" onclick="getMutualInfo()">
-                                        📊 Mutual Information
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-8">
-                                    <input type="text" class="form-control" id="manualFeatures" 
-                                           placeholder="feature1, feature2, feature3 (comma-separated)">
-                                </div>
-                                <div class="col-md-4">
-                                    <button class="btn btn-secondary w-100" onclick="applyManualSelection()">
-                                        Apply Manual Selection
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <div class="input-group">
-                                        <input type="number" class="form-control" id="pcaComponents" value="2" min="2" max="20">
-                                        <button class="btn btn-outline-primary" onclick="applyPCA()">Apply PCA</button>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <button class="btn btn-outline-secondary w-100" onclick="restoreFromPCA()">
-                                        🔄 Restore from PCA
-                                    </button>
-                                </div>
-                            </div>
-                            <div id="featureImportanceResult" class="mt-3"></div>
-                            <div id="featureStatus" class="alert alert-info mt-2" style="display: none;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== TRAIN SECTION ==================== -->
-                <div class="section" id="train">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-brain"></i> Train Model
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">Target Column</label>
-                                    <select class="form-select" id="targetColumn"></select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">Model Type</label>
-                                    <select class="form-select" id="modelType">
-                                        <option>Random Forest</option>
-                                        <option>Gradient Boosting</option>
-                                        <option>Logistic Regression</option>
-                                        <option>Decision Tree</option>
-                                        <option>SVM</option>
-                                        <option>KNN</option>
-                                        <option>Naive Bayes</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">Test Size</label>
-                                    <input type="number" class="form-control" id="testSize" value="0.2" min="0.1" max="0.5" step="0.05">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-check-label">
-                                        <input class="form-check-input" type="checkbox" id="useSmote"> Use SMOTE (for imbalanced data)
-                                    </label>
-                                </div>
-                            </div>
-
-                            <!-- Hyperparameters -->
-                            <div class="card mt-3">
-                                <div class="card-header">Hyperparameters</div>
-                                <div class="card-body">
-                                    <label class="form-label">n_estimators: <span id="nEstVal" class="slider-value">100</span></label>
-                                    <input type="range" class="form-range" id="nEstimators" min="10" max="500" value="100" 
-                                           oninput="document.getElementById('nEstVal').innerText=this.value">
-                                    
-                                    <label class="form-label mt-2">max_depth: <span id="depthVal" class="slider-value">10</span></label>
-                                    <input type="range" class="form-range" id="maxDepth" min="1" max="50" value="10" 
-                                           oninput="document.getElementById('depthVal').innerText=this.value">
-                                    
-                                    <label class="form-label mt-2">learning_rate: <span id="lrVal" class="slider-value">0.1</span></label>
-                                    <input type="range" class="form-range" id="learningRate" min="0.01" max="1" step="0.01" value="0.1" 
-                                           oninput="document.getElementById('lrVal').innerText=this.value">
-                                </div>
-                            </div>
-
-                            <button class="btn btn-primary w-100 mt-3" onclick="trainModel()">
-                                <i class="fas fa-rocket"></i> Train Model
-                            </button>
-                            <button class="btn btn-info w-100 mt-2" onclick="compareAllModels()">
-                                <i class="fas fa-chart-simple"></i> Compare All Models
-                            </button>
-                            <button class="btn btn-warning w-100 mt-2" onclick="showStackingDialog()">
-                                <i class="fas fa-link"></i> Train Stacked Model
-                            </button>
-                            <div id="trainResult" style="margin-top: 20px;"></div>
-                            <div id="comparisonResult" class="mt-3"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== EVALUATE SECTION ==================== -->
-                <div class="section" id="evaluate">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-chart-bar"></i> Model Evaluation
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3">
-                                <div class="col-md-12">
-                                    <label class="form-label">Select Model to Evaluate</label>
-                                    <div class="input-group">
-                                        <select class="form-select" id="modelSelector"></select>
-                                        <button class="btn btn-primary" onclick="loadSelectedModel()">
-                                            <i class="fas fa-sync"></i> Load Model
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Metrics Display -->
-                            <div id="metricsDisplay" class="alert alert-info mb-3" style="display: none;"></div>
-
-                            <!-- Evaluation Buttons -->
-                            <div class="row mb-3">
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="generateChart('confusion')">
-                                        🔢 Confusion Matrix
-                                    </button>
-                                </div>
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="generateChart('roc')">
-                                        📈 ROC Curve
-                                    </button>
-                                </div>
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="generateChart('pr')">
-                                        📉 Precision-Recall
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="getPermutationImportance()">
-                                        🔍 Permutation Importance
-                                    </button>
-                                </div>
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="getCrossValidation()">
-                                        📊 Cross-Validation
-                                    </button>
-                                </div>
-                                <div class="col-md-4">
-                                    <button class="btn btn-primary w-100" onclick="showMisclassified()">
-                                        ⚠️ Misclassified Samples
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <button class="btn btn-primary w-100" onclick="generateChart('residuals')">
-                                        📉 Residual Plot
-                                    </button>
-                                </div>
-                                <div class="col-md-6">
-                                    <button class="btn btn-primary w-100" onclick="getFeatureImportance()">
-                                        ⭐ Feature Importance Plot
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="chart-container" id="evalChartContainer" style="display: none;">
-                                <img id="evalChartImage" src="" alt="Chart">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== PREDICT SECTION ==================== -->
-                <div class="section" id="predict">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-crystal-ball"></i> Make Predictions
-                        </div>
-                        <div class="card-body">
-                            <div id="predictForm"></div>
-                            <button class="btn btn-primary w-100 mt-3" onclick="makePrediction()">
-                                <i class="fas fa-forward"></i> Predict
-                            </button>
-                            <div id="predictResult" style="margin-top: 20px;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================== INSIGHTS SECTION ==================== -->
-                <div class="section" id="insights">
-                    <div class="card">
-                        <div class="card-header">
-                            <i class="fas fa-lightbulb"></i> Data Insights
-                        </div>
-                        <div class="card-body">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <button class="btn btn-primary w-100" onclick="generateInsights()">
-                                        <i class="fas fa-sparkles"></i> Generate Insights
-                                    </button>
-                                </div>
-                                <div class="col-md-6">
-                                    <button class="btn btn-success w-100" onclick="exportReport()">
-                                        <i class="fas fa-file-export"></i> Export HTML Report
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-12">
-                                    <button class="btn btn-info w-100" onclick="showHealthScore()">
-                                        <i class="fas fa-heartbeat"></i> Show Dataset Health Score
-                                    </button>
-                                </div>
-                            </div>
-                            <div id="healthScoreContainer" style="display: none;"></div>
-                            <ul class="insights-list" id="insightsList"></ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div
+              id="modelStatus"
+              style="font-size: 0.8rem; margin-top: 10px"
+            ></div>
+          </nav>
         </div>
+
+        <!-- Main Content -->
+        <main class="col-lg-9">
+          <header class="header">
+            <div class="eyebrow">LOCAL ANALYTICS / DATA WORKBENCH</div>
+            <h1>DataYab</h1>
+            <p>
+              Your local dataset workbench. Explore, prepare, train, and
+              understand.
+            </p>
+          </header>
+          <div id="notice" role="status" aria-live="polite" hidden></div>
+
+          <!-- ==================== UPLOAD SECTION ==================== -->
+          <div class="section active" id="upload">
+            <div class="card">
+              <div class="card-header">Upload Dataset</div>
+              <div class="card-body">
+                <div
+                  class="upload-area"
+                  id="uploadArea"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Choose a dataset file"
+                >
+                  <p style="font-size: 1.1rem; margin: 15px 0">
+                    Drag & drop your file here
+                  </p>
+                  <p style="color: #666">or <strong>click to browse</strong></p>
+                  <small style="color: #526172"
+                    >CSV, Excel, JSON, Parquet. Upload limit: 50 MB.</small
+                  >
+                  <input
+                    type="file"
+                    id="fileInput"
+                    aria-label="Dataset file"
+                    accept=".csv,.xlsx,.xls,.json,.parquet"
+                    style="display: none"
+                  />
+                </div>
+                <p class="help">
+                  Start with a dataset, review its columns, then choose a target
+                  in Train Model. Your uploaded file stays on this machine.
+                </p>
+                <div id="uploadResult" style="margin-top: 20px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== EXPLORE SECTION ==================== -->
+          <div class="section" id="explore">
+            <div class="card">
+              <div class="card-header">Data Preview</div>
+              <div class="card-body">
+                <div
+                  class="table-responsive"
+                  tabindex="0"
+                  role="region"
+                  aria-label="Scrollable data table"
+                >
+                  <table class="table table-sm" id="previewTable">
+                    <thead></thead>
+                    <tbody>
+                      <tr>
+                        <td>Upload a dataset to preview its rows.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">Generate Charts</div>
+              <div class="card-body">
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label" for="chartType">Chart Type</label>
+                    <select class="form-select" id="chartType">
+                      <option value="correlation">Correlation Heatmap</option>
+                      <option value="missing">Missing Values Map</option>
+                      <option value="histogram">Histogram</option>
+                      <option value="target">Target Distribution</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" for="chartColumn"
+                      >Column (for histogram)</label
+                    >
+                    <select class="form-select" id="chartColumn"></select>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary"
+                  onclick="generateExploreChart()"
+                >
+                  Generate Chart
+                </button>
+                <div
+                  class="chart-container"
+                  id="chartContainer"
+                  style="display: none"
+                >
+                  <img id="chartImage" src="" alt="Chart" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== CLEAN SECTION ==================== -->
+          <div class="section" id="clean">
+            <div class="card">
+              <div class="card-header">Data Cleaning</div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('auto_clean')"
+                    >
+                      Auto Clean
+                    </button>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('remove_missing')"
+                    >
+                      Remove Missing
+                    </button>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('remove_duplicates')"
+                    >
+                      Remove Duplicates
+                    </button>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('remove_outliers')"
+                    >
+                      Remove Outliers
+                    </button>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('encode_categorical')"
+                    >
+                      Encode Categorical
+                    </button>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="cleanData('remove_constant')"
+                    >
+                      Remove Constant
+                    </button>
+                  </div>
+                </div>
+                <div id="cleanResult" style="margin-top: 20px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== FEATURE SELECTION SECTION ==================== -->
+          <div class="section" id="feature">
+            <div class="card">
+              <div class="card-header">Feature Selection</div>
+              <div class="card-body">
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="getRFImportance()"
+                    >
+                      Random Forest Importance
+                    </button>
+                  </div>
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="getMutualInfo()"
+                    >
+                      Mutual Information
+                    </button>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-8" style="flex: 2; min-width: 0">
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="manualFeatures"
+                      aria-label="Feature names separated by commas"
+                      placeholder="feature1, feature2, feature3 (comma-separated)"
+                    />
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-secondary w-100"
+                      onclick="applyManualSelection()"
+                    >
+                      Apply Manual Selection
+                    </button>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <div class="input-group">
+                      <input
+                        type="number"
+                        class="form-control"
+                        id="pcaComponents"
+                        aria-label="Number of PCA components"
+                        value="2"
+                        min="2"
+                        max="20"
+                      />
+                      <button
+                        class="btn btn-outline-primary"
+                        onclick="applyPCA()"
+                      >
+                        Apply PCA
+                      </button>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-outline-secondary w-100"
+                      onclick="restoreFromPCA()"
+                    >
+                      Restore from PCA
+                    </button>
+                  </div>
+                </div>
+                <div id="featureImportanceResult" class="mt-3"></div>
+                <div
+                  id="featureStatus"
+                  class="alert alert-info mt-2"
+                  style="display: none"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== TRAIN SECTION ==================== -->
+          <div class="section" id="train">
+            <div class="card">
+              <div class="card-header">Train Model</div>
+              <div class="card-body">
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label" for="targetColumn"
+                      >Target Column</label
+                    >
+                    <select class="form-select" id="targetColumn"></select>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" for="modelType">Model Type</label>
+                    <select class="form-select" id="modelType">
+                      <option>Random Forest</option>
+                      <option>Gradient Boosting</option>
+                      <option>Logistic Regression</option>
+                      <option>Decision Tree</option>
+                      <option>SVM</option>
+                      <option>KNN</option>
+                      <option>Naive Bayes</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label" for="testSize">Test Size</label>
+                    <input
+                      type="number"
+                      class="form-control"
+                      id="testSize"
+                      value="0.2"
+                      min="0.1"
+                      max="0.5"
+                      step="0.05"
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-check-label">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="useSmote"
+                      />
+                      Use SMOTE (for imbalanced data)
+                    </label>
+                  </div>
+                </div>
+
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <label for="problemType" class="form-label"
+                      >Problem type</label
+                    ><select id="problemType" class="form-select">
+                      <option value="auto">Detect automatically</option>
+                      <option value="classification">Classification</option>
+                      <option value="regression">Regression</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <p class="help">
+                      Training fits preprocessing on the training split. Choose
+                      the problem explicitly for numeric class labels.
+                    </p>
+                  </div>
+                </div>
+                <!-- Hyperparameters -->
+                <div class="card mt-3">
+                  <div class="card-header">Hyperparameters</div>
+                  <div class="card-body">
+                    <label class="form-label"
+                      >n_estimators:
+                      <span id="nEstVal" class="slider-value">100</span></label
+                    >
+                    <input
+                      type="range"
+                      class="form-range"
+                      id="nEstimators"
+                      aria-label="Number of estimators"
+                      min="10"
+                      max="500"
+                      value="100"
+                      oninput="document.getElementById('nEstVal').innerText=this.value"
+                    />
+
+                    <label class="form-label mt-2"
+                      >max_depth:
+                      <span id="depthVal" class="slider-value">10</span></label
+                    >
+                    <input
+                      type="range"
+                      class="form-range"
+                      id="maxDepth"
+                      aria-label="Maximum tree depth"
+                      min="1"
+                      max="50"
+                      value="10"
+                      oninput="document.getElementById('depthVal').innerText=this.value"
+                    />
+
+                    <label class="form-label mt-2"
+                      >learning_rate:
+                      <span id="lrVal" class="slider-value">0.1</span></label
+                    >
+                    <input
+                      type="range"
+                      class="form-range"
+                      id="learningRate"
+                      aria-label="Learning rate"
+                      min="0.01"
+                      max="1"
+                      step="0.01"
+                      value="0.1"
+                      oninput="document.getElementById('lrVal').innerText=this.value"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  class="btn btn-primary w-100 mt-3"
+                  onclick="trainModel()"
+                >
+                  Train Model
+                </button>
+                <button
+                  class="btn btn-info w-100 mt-2"
+                  onclick="compareAllModels()"
+                >
+                  Compare All Models
+                </button>
+                <button
+                  class="btn btn-warning w-100 mt-2"
+                  onclick="showStackingDialog()"
+                >
+                  Train Stacked Model
+                </button>
+                <div id="trainResult" style="margin-top: 20px"></div>
+                <div id="comparisonResult" class="mt-3"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== EVALUATE SECTION ==================== -->
+          <div class="section" id="evaluate">
+            <div class="card">
+              <div class="card-header">Model Evaluation</div>
+              <div class="card-body">
+                <div class="row mb-3">
+                  <div class="col-md-12">
+                    <label class="form-label">Select Model to Evaluate</label>
+                    <div class="input-group">
+                      <select class="form-select" id="modelSelector"></select>
+                      <button
+                        class="btn btn-primary"
+                        onclick="loadSelectedModel()"
+                      >
+                        Load Model
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Metrics Display -->
+                <div
+                  id="metricsDisplay"
+                  class="alert alert-info mb-3"
+                  style="display: none"
+                ></div>
+
+                <!-- Evaluation Buttons -->
+                <div class="row mb-3">
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="generateChart('confusion')"
+                    >
+                      Confusion Matrix
+                    </button>
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="generateChart('roc')"
+                    >
+                      ROC Curve
+                    </button>
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="generateChart('pr')"
+                    >
+                      Precision-Recall
+                    </button>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="getPermutationImportance()"
+                    >
+                      Permutation Importance
+                    </button>
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="getCrossValidation()"
+                    >
+                      Cross-Validation
+                    </button>
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="showMisclassified()"
+                    >
+                      Misclassified Samples
+                    </button>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="generateChart('residuals')"
+                    >
+                      Residual Plot
+                    </button>
+                  </div>
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="getFeatureImportance()"
+                    >
+                      Feature Importance Plot
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  class="chart-container"
+                  id="evalChartContainer"
+                  style="display: none"
+                >
+                  <img id="evalChartImage" src="" alt="Chart" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== PREDICT SECTION ==================== -->
+          <div class="section" id="predict">
+            <div class="card">
+              <div class="card-header">Make Predictions</div>
+              <div class="card-body">
+                <div id="predictForm">
+                  <p class="empty-state">
+                    Train a model to build a prediction form.
+                  </p>
+                </div>
+                <button
+                  class="btn btn-primary w-100 mt-3"
+                  onclick="makePrediction()"
+                >
+                  Predict
+                </button>
+                <div id="predictResult" style="margin-top: 20px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== INSIGHTS SECTION ==================== -->
+          <div class="section" id="insights">
+            <div class="card">
+              <div class="card-header">Data Insights</div>
+              <div class="card-body">
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="generateInsights()"
+                    >
+                      Generate Insights
+                    </button>
+                  </div>
+                  <div class="col-md-6">
+                    <button
+                      class="btn btn-success w-100"
+                      onclick="exportReport()"
+                    >
+                      Export HTML Report
+                    </button>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-12">
+                    <button
+                      class="btn btn-info w-100"
+                      onclick="showHealthScore()"
+                    >
+                      Show Dataset Health Score
+                    </button>
+                  </div>
+                </div>
+                <div id="healthScoreContainer" style="display: none"></div>
+                <ul class="insights-list" id="insightsList"></ul>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
 
     <!-- Stacking Dialog Modal -->
-    <div class="modal fade" id="stackingModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-link"></i> Train Stacked Model</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <label class="form-label">Base Model 1</label>
-                    <select class="form-select" id="stackBase1"></select>
-                    <label class="form-label mt-2">Base Model 2</label>
-                    <select class="form-select" id="stackBase2"></select>
-                    <label class="form-label mt-2">Meta-Learner</label>
-                    <select class="form-select" id="stackMeta">
-                        <option>Logistic Regression</option>
-                        <option>Random Forest</option>
-                        <option>Gradient Boosting</option>
-                        <option>SVM</option>
-                    </select>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="trainStackedModel()">Train Stacked Model</button>
-                </div>
-            </div>
+    <div
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      hidden
+      id="stackingModal"
+      aria-label="Train stacked model"
+      tabindex="-1"
+    >
+      <div class="modal-dialog">
+        <div class="modal-content" tabindex="-1">
+          <div class="modal-header">
+            <h5 class="modal-title">Train Stacked Model</h5>
+            <button
+              type="button"
+              class="btn-close"
+              aria-label="Close dialog"
+              data-bs-dismiss="modal"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label" for="stackBase1">Base Model 1</label>
+            <select class="form-select" id="stackBase1"></select>
+            <label class="form-label mt-2" for="stackBase2">Base Model 2</label>
+            <select class="form-select" id="stackBase2"></select>
+            <label class="form-label mt-2" for="stackMeta">Meta-Learner</label>
+            <select class="form-select" id="stackMeta">
+              <option>Logistic Regression</option>
+              <option>Random Forest</option>
+              <option>Gradient Boosting</option>
+              <option>SVM</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick="trainStackedModel()"
+            >
+              Train Stacked Model
+            </button>
+          </div>
         </div>
+      </div>
     </div>
 
     <!-- Misclassified Samples Modal -->
-    <div class="modal fade" id="misclassifiedModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle"></i> Misclassified Samples</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm" id="misclassifiedTable">
-                            <thead></thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
+    <div
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      hidden
+      id="misclassifiedModal"
+      aria-label="Misclassified samples"
+      tabindex="-1"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content" tabindex="-1">
+          <div class="modal-header">
+            <h5 class="modal-title">Misclassified Samples</h5>
+            <button
+              type="button"
+              class="btn-close"
+              aria-label="Close dialog"
+              data-bs-dismiss="modal"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <div
+              class="table-responsive"
+              tabindex="0"
+              role="region"
+              aria-label="Scrollable data table"
+            >
+              <table class="table table-sm" id="misclassifiedTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
             </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
         </div>
+      </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/app.js"></script>
-</body>
+  </body>
 </html>

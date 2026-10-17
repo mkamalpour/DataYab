@@ -1,602 +1,514 @@
-"""
-web.py — FastAPI web interface for DataYab
-Modern, fast, async backend for HTML front-end
-"""
+"""Local, serialized DataYab web workspace with bounded temporary uploads."""
 
-import os
-import json
-import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Body
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-import pandas as pd
+from functools import wraps
+import threading
+import tempfile
+import math
+import datetime
 import numpy as np
-
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Body, Request
+from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
 from backend.core import DataYabCore
 
-# ================================
-# FastAPI Setup
-# ================================
-app = FastAPI(title="DataYab", version="1.0")
-
-# Mount static files
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Folders
-UPLOAD_FOLDER = Path(__file__).parent.parent / "uploads"
-UPLOAD_FOLDER.mkdir(exist_ok=True)
-
-# Global core instance
+ROOT = Path(__file__).resolve().parent
+MAX_UPLOAD = 50 * 1024 * 1024
 core = DataYabCore()
+state_lock = threading.RLock()
+app = FastAPI(title="DataYab", version="2.0.0")
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"],
+)
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
-# Helper function
-def convert_to_native(obj):
-    """Convert numpy types to Python native types."""
-    if isinstance(obj, (np.integer, np.int64, np.int32)):
-        return int(obj)
-    elif isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        return {k: convert_to_native(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_native(i) for i in obj]
-    elif isinstance(obj, np.bool_):
-        return bool(obj)
-    return obj
 
-# ================================
-# Routes
-# ================================
+@app.middleware("http")
+async def local_request_guard(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin and origin not in {
+        f"http://{request.headers.get('host')}",
+        f"https://{request.headers.get('host')}",
+    }:
+        return JSONResponse(
+            {"detail": "Cross-origin access is not allowed."}, status_code=403
+        )
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return JSONResponse(
+            {"detail": "Cross-site access is not allowed."}, status_code=403
+        )
+    length = request.headers.get("content-length")
+    if length:
+        try:
+            if int(length) > MAX_UPLOAD + 1024 * 1024:
+                return JSONResponse(
+                    {"detail": "Upload limit is 50 MB."}, status_code=413
+                )
+        except ValueError:
+            return JSONResponse({"detail": "Invalid content length."}, status_code=400)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def convert_to_native(value):
+    if isinstance(value, dict):
+        return {str(k): convert_to_native(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [convert_to_native(v) for v in value]
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        return float(value) if math.isfinite(value) else None
+    if value is None or value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, (datetime.datetime, datetime.date, pd.Timestamp)):
+        return value.isoformat()
+    return value
+
+
+def workspace(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        with state_lock:
+            try:
+                result = function(*args, **kwargs)
+                if isinstance(result, dict) and result.get("success") is False:
+                    raise HTTPException(400, result.get("message", "Operation failed."))
+                return convert_to_native(result)
+            except HTTPException:
+                raise
+            except (ValueError, TypeError, KeyError, IndexError) as error:
+                raise HTTPException(400, str(error)) from error
+
+    return guarded
+
+
+class TrainRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str = Field(min_length=1)
+    model: str = "Random Forest"
+    test_size: float = Field(default=0.2, gt=0, lt=1)
+    problem_type: Literal["auto", "classification", "regression"] = "auto"
+    scale: bool = True
+    scaler_type: Literal["standard", "minmax"] = "standard"
+    use_smote: bool = False
+    class_weight: Literal["balanced", "none"] | None = None
+    n_estimators: int | None = Field(default=None, ge=1, le=2000)
+    max_depth: int | None = Field(default=None, ge=1, le=100)
+    learning_rate: float | None = Field(default=None, gt=0, le=10)
+    C: float | None = Field(default=None, gt=0, le=100000)
+    n_neighbors: int | None = Field(default=None, ge=1, le=1000)
+
+
+def prepare(request):
+    return core.split_data(
+        request.target,
+        test_size=request.test_size,
+        scale=request.scale,
+        scaler_type=request.scaler_type,
+        problem_type=request.problem_type,
+    )
+
+
 @app.get("/")
-async def home():
-    """Serve HTML front-end."""
-    html_path = Path(__file__).parent / "templates" / "index.html"
-    if not html_path.exists():
-        return HTMLResponse("<h1>HTML template not found</h1>", status_code=404)
-    return FileResponse(str(html_path), media_type="text/html")
+def home():
+    return FileResponse(ROOT / "templates/index.html", media_type="text/html")
+
 
 @app.get("/api/status")
-async def status():
-    """Get current status."""
+@workspace
+def status():
     if core.df is None:
-        return {"loaded": False, "message": "No dataset loaded"}
-    
+        return {
+            "loaded": False,
+            "message": "No dataset loaded",
+            "model": core.model_name,
+        }
     info = core.get_info()
     return {
         "loaded": True,
-        "rows": info['rows'],
-        "cols": info['cols'],
-        "columns": info['columns'][:20],
+        "rows": info["rows"],
+        "cols": info["cols"],
+        "columns": info["columns"],
         "target": core.target_col,
         "model": core.model_name,
-        "problem_type": core.problem_type
+        "problem_type": core.problem_type,
     }
+
 
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
-    """Upload and load dataset."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in (".csv", ".xlsx", ".xls", ".json", ".parquet"):
+        await file.close()
+        raise HTTPException(400, "Supported files: CSV, Excel, JSON, Parquet.")
     try:
-        filepath = UPLOAD_FOLDER / file.filename
-        with open(filepath, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        result = core.load_file(str(filepath))
-        if result["success"]:
-            info = core.get_info()
-            return {
-                "success": True,
-                "message": result["message"],
-                "shape": f"{info['rows']:,} × {info['cols']}",
-                "columns": info['columns']
-            }
-        else:
-            return {"success": False, "message": result["message"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        with tempfile.TemporaryDirectory(prefix="datayab-upload-") as directory:
+            path = Path(directory) / ("dataset" + suffix)
+            size = 0
+            with path.open("wb") as stream:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_UPLOAD:
+                        raise HTTPException(413, "Upload limit is 50 MB.")
+                    stream.write(chunk)
+            if not size:
+                raise HTTPException(400, "The uploaded file is empty.")
+
+            def install():
+                with state_lock:
+                    result = core.load_file(path)
+                    if not result["success"]:
+                        raise HTTPException(400, result["message"])
+                    core.file_path = Path(
+                        (file.filename or "dataset").replace("\\", "/")
+                    ).name
+                    return {
+                        "success": True,
+                        "message": result["message"],
+                        "shape": f"{len(core.df):,} x {len(core.df.columns)}",
+                        "columns": list(core.df.columns),
+                    }
+
+            return await run_in_threadpool(install)
+    finally:
+        await file.close()
+
 
 @app.get("/api/preview")
-async def preview(rows: int = 10):
-    """Get data preview."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    df = core.df.head(rows)
+@workspace
+def preview(rows: int = Query(10, ge=1, le=200)):
+    core._require_data()
+    frame = core.df.head(rows)
     return {
         "success": True,
-        "columns": list(df.columns),
-        "data": df.values.tolist(),
-        "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()}
+        "columns": list(frame.columns),
+        "data": frame.values.tolist(),
+        "dtypes": {col: str(dtype) for col, dtype in frame.dtypes.items()},
     }
 
-@app.post("/api/clean")
-async def clean(operation: str, strategy: Optional[str] = None, target: Optional[str] = None):
-    """Apply cleaning operations."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    try:
-        if operation == "auto_clean":
-            result = core.auto_clean(target_col=target)
-            return {"success": True, "steps": result["steps"]}
-        elif operation == "remove_missing":
-            result = core.handle_missing(strategy or "median")
-            return {"success": True, "message": result["message"]}
-        elif operation == "remove_duplicates":
-            result = core.remove_duplicates()
-            return {"success": True, "removed": int(result.get("removed", 0))}
-        elif operation == "remove_outliers":
-            result = core.remove_outliers_isolation_forest(0.1)
-            return {"success": True, "removed": int(result.get("removed", 0))}
-        elif operation == "encode_categorical":
-            result = core.encode_categorical()
-            return {"success": True, "encoded": result.get("encoded_columns", [])}
-        elif operation == "remove_constant":
-            result = core.remove_constant_columns()
-            return {"success": True, "removed": result.get("removed", [])}
-        elif operation == "fix_dtypes":
-            result = core.fix_dtypes()
-            return {"success": True, "converted": result.get("converted", [])}
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown operation: {operation}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/train")
-async def train(request: Dict[str, Any] = Body(...)):
-    """Train a model - accepts JSON body."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    try:
-        target = request.get("target")
-        model = request.get("model", "Random Forest")
-        test_size = request.get("test_size", 0.2)
-        use_smote = request.get("use_smote", False)
-        
-        if not target:
-            raise HTTPException(status_code=400, detail="Target column required")
-        
-        # Split data
-        core.split_data(target, test_size=test_size)
-        
-        # Build hyperparameters based on model type (filter properly)
-        hyper = {}
-        
-        # n_estimators - only for RF and Gradient Boosting
-        if "n_estimators" in request and model in ["Random Forest", "Gradient Boosting"]:
-            hyper["n_estimators"] = request["n_estimators"]
-        
-        # max_depth - for tree-based models
-        if "max_depth" in request and model in ["Random Forest", "Gradient Boosting", "Decision Tree"]:
-            hyper["max_depth"] = request["max_depth"]
-        
-        # learning_rate - only for Gradient Boosting
-        if "learning_rate" in request and model == "Gradient Boosting":
-            hyper["learning_rate"] = request["learning_rate"]
-        
-        # C - for Logistic Regression and SVM
-        if "C" in request and model in ["Logistic Regression", "SVM"]:
-            hyper["C"] = request["C"]
-        
-        # n_neighbors - for KNN
-        if "n_neighbors" in request and model == "KNN":
-            hyper["n_neighbors"] = request["n_neighbors"]
-        
-        # Train the model
-        core.train(model_name=model, use_smote=use_smote, **hyper)
-        metrics = core.get_metrics()
-        metrics = convert_to_native(metrics)
-        
-        return {
-            "success": True,
-            "model": model,
-            "problem_type": core.problem_type,
-            "metrics": metrics
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/predict")
-async def predict(inputs: Dict[str, Any] = Body(...)):
-    """Make a prediction."""
-    if core.model is None:
-        raise HTTPException(status_code=400, detail="No model trained")
-    
-    try:
-        result = core.predict(inputs)
-        result = convert_to_native(result)
-        return {"success": True, "result": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/insights")
-async def insights():
-    """Generate insights."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    try:
-        insights_list = core.generate_insights()
-        return {"success": True, "insights": insights_list}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/chart/{chart_type}")
-async def chart(chart_type: str, column: Optional[str] = Query(None)):
-    """Generate a chart."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    try:
-        if chart_type == "histogram":
-            if not column:
-                numeric_cols = core.df.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
-                    column = numeric_cols[0]
-                else:
-                    column = core.df.columns[0]
-            if not pd.api.types.is_numeric_dtype(core.df[column]):
-                raise HTTPException(400, f"Cannot plot histogram on non-numeric column: '{column}'. Please select a numeric column.")
-            img_b64 = core.plot_histogram(column)
-        elif chart_type == "correlation":
-            img_b64 = core.plot_correlation_heatmap()
-        elif chart_type == "missing":
-            img_b64 = core.plot_missing_heatmap()
-        elif chart_type == "target":
-            if not column:
-                column = core.target_col
-            if not column:
-                raise HTTPException(400, "No target column set. Select a target column first.")
-            img_b64 = core.plot_target_distribution(column)
-        elif chart_type == "confusion" and core.problem_type == "classification":
-            img_b64 = core.plot_confusion_matrix()
-        elif chart_type == "roc" and core.problem_type == "classification":
-            img_b64 = core.plot_roc_curve()
-        elif chart_type == "pr" and core.problem_type == "classification":
-            img_b64 = core.plot_precision_recall_curve()
-        elif chart_type == "residuals" and core.problem_type == "regression":
-            img_b64 = core.plot_residuals()
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown chart: {chart_type}")
-        
-        return {"success": True, "image": img_b64}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/columns")
-async def columns():
-    """Get list of columns."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
+@workspace
+def columns():
+    core._require_data()
     info = core.get_info()
     return {
         "success": True,
-        "columns": list(core.df.columns),
-        "numeric": info['numeric_cols'],
-        "categorical": info['categorical_cols']
+        "columns": info["columns"],
+        "numeric": info["numeric_cols"],
+        "categorical": info["categorical_cols"],
     }
 
-@app.get("/api/export/report")
-async def export_report():
-    """Export HTML report."""
-    if core.df is None:
-        raise HTTPException(status_code=400, detail="No data loaded")
-    
-    try:
-        report_path = UPLOAD_FOLDER / "report.html"
-        result = core.export_report(str(report_path))
-        if result["success"]:
-            return FileResponse(str(report_path), media_type="text/html", filename="DataYab_Report.html")
-        else:
-            raise HTTPException(status_code=500, detail=result["message"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/models")
-async def get_models():
-    """Get list of trained models."""
-    models = core.get_trained_models()
+@app.post("/api/reset")
+@workspace
+def reset():
+    return core.reset_to_original()
+
+
+@app.post("/api/clean")
+@workspace
+def clean(operation: str, strategy: str | None = None, target: str | None = None):
+    core._require_data()
+    if target:
+        if target not in core.df:
+            raise ValueError("Target column does not exist.")
+        core.target_col = target
+    operations = {
+        "auto_clean": lambda: core.auto_clean(target_col=target),
+        "remove_missing": lambda: core.handle_missing(strategy or "median"),
+        "remove_duplicates": core.remove_duplicates,
+        "remove_outliers": lambda: core.remove_outliers_isolation_forest(0.1),
+        "encode_categorical": core.encode_categorical,
+        "remove_constant": core.remove_constant_columns,
+        "fix_dtypes": core.fix_dtypes,
+    }
+    if operation not in operations:
+        raise ValueError("Unknown cleaning operation.")
+    return operations[operation]()
+
+
+@app.post("/api/split")
+@workspace
+def split(request: TrainRequest):
+    return prepare(request)
+
+
+@app.post("/api/train")
+@workspace
+def train(request: TrainRequest):
+    prepare(request)
+    names = {
+        "Random Forest": ["n_estimators", "max_depth"],
+        "Gradient Boosting": ["n_estimators", "max_depth", "learning_rate"],
+        "Decision Tree": ["max_depth"],
+        "Logistic Regression": ["C"],
+        "SVM": ["C"],
+        "SVR": ["C"],
+        "KNN": ["n_neighbors"],
+        "XGBoost": ["n_estimators", "max_depth", "learning_rate"],
+    }.get(request.model, [])
+    params = {
+        name: getattr(request, name)
+        for name in names
+        if getattr(request, name) is not None
+    }
+    core.train(
+        request.model,
+        use_smote=request.use_smote,
+        class_weight=request.class_weight,
+        **params,
+    )
     return {
         "success": True,
-        "models": models,
-        "current_model": core.model_name
+        "model": core.model_name,
+        "problem_type": core.problem_type,
+        "metrics": core.get_metrics(),
     }
 
-@app.post("/api/model/select")
-async def select_model(request: Dict[str, Any] = Body(...)):
-    """Switch to a trained model for evaluation."""
-    model_name = request.get("model_name")
-    if not model_name:
-        raise HTTPException(status_code=400, detail="Model name required")
-    result = core.set_evaluation_model(model_name)
-    if result.get("success"):
-        return {"success": True, "model": model_name}
-    else:
-        raise HTTPException(status_code=400, detail=result.get("message"))
-
-@app.post("/api/model/stack")
-async def train_stacked(request: Dict[str, Any] = Body(...)):
-    """Train a stacked ensemble model."""
-    try:
-        base_model_1 = request.get("base_model_1")
-        base_model_2 = request.get("base_model_2")
-        meta_model = request.get("meta_model", "Logistic Regression")
-        
-        if not base_model_1 or not base_model_2:
-            raise HTTPException(400, "Both base models required")
-        
-        result = core.train_stacked_model(base_model_1, base_model_2, meta_model)
-        if result.get("success"):
-            return {
-                "success": True,
-                "model": result.get("model"),
-                "base_models": result.get("base_models"),
-                "meta_model": result.get("meta_model"),
-                "elapsed": result.get("elapsed")
-            }
-        else:
-            raise HTTPException(status_code=400, detail=result.get("message"))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/input-schema")
-async def get_input_schema():
-    """Get input form schema (only selected features)."""
-    if core.model is None:
-        raise HTTPException(status_code=400, detail="No model trained. Train a model first.")
-    
-    try:
-        schema = core.get_input_form_schema()
-        return {"success": True, "schema": schema}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/evaluate")
-async def evaluate():
-    """Get evaluation metrics for current model."""
-    if core.model is None:
-        raise HTTPException(status_code=400, detail="No model trained")
-    try:
-        metrics = core.get_metrics()
-        metrics = convert_to_native(metrics)
-        return {"success": True, "metrics": metrics}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/confusion-matrix")
-async def confusion_matrix():
-    """Get confusion matrix data."""
-    if core.model is None:
-        raise HTTPException(status_code=400, detail="No model trained")
-    if core.problem_type != "classification":
-        raise HTTPException(status_code=400, detail="Confusion matrix only for classification")
-    try:
-        cm_data = core.get_confusion_matrix()
-        return {"success": True, "matrix": cm_data["matrix"], "labels": cm_data["labels"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/feature-importance")
-async def feature_importance():
-    """Get feature importance."""
-    if core.model is None:
-        raise HTTPException(status_code=400, detail="No model trained")
-    try:
-        return {"success": True, "importance": convert_to_native(core.feature_importance)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ==================== FEATURE SELECTION ENDPOINTS ====================
-
-@app.get("/api/feature-importance-rf")
-async def feature_importance_rf():
-    """Get Random Forest feature importance."""
-    if core.X_train is None:
-        raise HTTPException(400, "Split data first (train a model)")
-    try:
-        importance = core.get_fast_feature_importance(top_n=20)
-        return {"success": True, "importance": convert_to_native(importance.to_dict())}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.get("/api/mutual-info")
-async def mutual_info():
-    """Get mutual information scores."""
-    if core.X_train is None:
-        raise HTTPException(400, "Split data first (train a model)")
-    try:
-        mi = core.get_mutual_information_top(k=20)
-        return {"success": True, "importance": convert_to_native(mi.to_dict())}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/feature/select")
-async def feature_select(request: Dict[str, Any] = Body(...)):
-    """Apply manual feature selection."""
-    features = request.get("features", [])
-    if not features:
-        raise HTTPException(400, "No features provided")
-    if core.X_train is None:
-        raise HTTPException(400, "No training data. Split data first.")
-    try:
-        core.select_features_manual(features)
-        return {"success": True, "count": len(features)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/feature/pca")
-async def feature_pca(components: int = 2):
-    """Apply PCA."""
-    if core.X_train is None:
-        raise HTTPException(400, "No training data. Split data first.")
-    if len(core.feature_names) < 2:
-        raise HTTPException(400, "Need at least 2 features for PCA")
-    try:
-        result = core.apply_pca(components)
-        return {"success": True, "total_variance": sum(result['explained_variance_ratio'])}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/feature/restore")
-async def feature_restore():
-    """Restore from PCA."""
-    try:
-        result = core.restore_from_pca()
-        return {"success": result}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/feature/keep_top")
-async def feature_keep_top(k: int = 10):
-    """Keep top K features."""
-    if core.X_train is None:
-        raise HTTPException(400, "No training data. Split data first.")
-    try:
-        importance = core.get_fast_feature_importance(top_n=k)
-        features = list(importance.index)
-        core.select_features_manual(features)
-        return {"success": True, "features": features[:10]}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.get("/api/feature/status")
-async def feature_status():
-    """Get feature selection status."""
-    total = len(core.feature_names) if core.feature_names else 0
-    selected = len(core._selected_feature_names) if core._selected_feature_names else total
-    return {"success": True, "total": total, "selected": selected}
 
 @app.post("/api/train/compare")
-async def train_compare(request: Dict[str, Any] = Body(...)):
-    """Compare all models - without passing hyperparameters."""
-    target = request.get("target")
-    if not target:
-        raise HTTPException(400, "Target required")
-    if core.df is None:
-        raise HTTPException(400, "No data loaded")
-    try:
-        core.split_data(target, test_size=0.2)
-        # IMPORTANT: Don't pass any hyperparameters here
-        df = core.train_all_models()
-        
-        score_col = "Accuracy" if core.problem_type == "classification" else "R²"
-        leaderboard = []
-        for _, row in df.iterrows():
-            if score_col in row:
-                leaderboard.append({
-                    "model": row["Model"],
-                    "score": float(row[score_col])
-                })
-        leaderboard.sort(key=lambda x: x["score"], reverse=True)
-        return {
-            "success": True,
-            "leaderboard": leaderboard[:10],
-            "best_model": leaderboard[0]["model"] if leaderboard else None
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@workspace
+def train_compare(request: TrainRequest):
+    prepare(request)
+    frame = core.train_all_models(
+        use_smote=request.use_smote, class_weight=request.class_weight
+    )
+    metric = "Accuracy" if core.problem_type == "classification" else "R\u00b2"
+    leaderboard = [
+        {"model": row["Model"], "score": float(row[metric])}
+        for _, row in frame.iterrows()
+    ]
+    return {
+        "success": True,
+        "leaderboard": leaderboard,
+        "best_model": core.model_name,
+        "evaluation": "training_cross_validation",
+    }
 
-@app.get("/api/permutation-importance")
-async def permutation_importance():
-    """Get permutation importance."""
-    if core.model is None:
-        raise HTTPException(400, "No model trained")
-    try:
-        df = core.get_permutation_importance(top_n=15)
-        importance = df.to_dict(orient="records")
-        return {"success": True, "importance": convert_to_native(importance)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+
+@app.get("/api/models")
+@workspace
+def models():
+    return {
+        "success": True,
+        "models": core.get_trained_models(),
+        "current_model": core.model_name,
+    }
+
+
+@app.post("/api/model/select")
+@workspace
+def select_model(request: dict = Body(...)):
+    return core.select_model(request.get("model_name", ""))
+
+
+@app.post("/api/model/stack")
+@workspace
+def stack(request: dict = Body(...)):
+    return core.train_stacked_model(
+        request.get("base_model_1"),
+        request.get("base_model_2"),
+        request.get("meta_model", "Logistic Regression"),
+    )
+
+
+@app.post("/api/predict")
+@workspace
+def predict(inputs: dict = Body(...)):
+    return {"success": True, "result": core.predict(inputs)}
+
+
+@app.get("/api/input-schema")
+@workspace
+def input_schema():
+    return {"success": True, "schema": core.get_input_form_schema()}
+
+
+@app.get("/api/evaluate")
+@workspace
+def evaluate():
+    return {"success": True, "metrics": core.get_metrics()}
+
+
+@app.get("/api/confusion-matrix")
+@workspace
+def confusion():
+    return {"success": True, **core.get_confusion_matrix()}
+
+
+@app.get("/api/feature-importance")
+@workspace
+def feature_importance():
+    core._require_model()
+    return {"success": True, "importance": core.feature_importance}
+
+
+@app.get("/api/feature-importance-rf")
+@workspace
+def rf_importance():
+    return {"success": True, "importance": core.get_fast_feature_importance().to_dict()}
+
+
+@app.get("/api/mutual-info")
+@workspace
+def mutual_info():
+    return {
+        "success": True,
+        "importance": core.get_mutual_information_top(20).to_dict(),
+    }
+
+
+@app.post("/api/feature/select")
+@workspace
+def feature_select(request: dict = Body(...)):
+    features = request.get("features")
+    if not isinstance(features, list):
+        raise ValueError("Provide a list of feature names.")
+    core.select_features_manual(features)
+    return {"success": True, "count": len(features)}
+
+
+@app.post("/api/feature/pca")
+@workspace
+def pca(components: int = Query(2, ge=1)):
+    result = core.apply_pca(components)
+    return {"success": True, "total_variance": sum(result["explained_variance_ratio"])}
+
+
+@app.post("/api/feature/restore")
+@workspace
+def restore():
+    return {"success": core.restore_from_pca()}
+
+
+@app.post("/api/feature/keep_top")
+@workspace
+def keep_top(k: int = Query(10, ge=1, le=2000)):
+    features = list(core.get_fast_feature_importance(k).index)
+    core.select_features_manual(features)
+    return {"success": True, "features": features}
+
+
+@app.get("/api/feature/status")
+@workspace
+def feature_status():
+    return {
+        "success": True,
+        "total": len(core._all_input_names),
+        "selected": len(core.feature_names),
+    }
+
 
 @app.get("/api/cross-validation")
-async def cross_validation():
-    """Get cross-validation scores."""
-    if core.model is None:
-        raise HTTPException(400, "No model trained")
-    try:
-        cv = core.get_cross_val_score(cv=5)
-        return {"success": True, "cv": 5, "mean": cv["mean"], "std": cv["std"], "scores": cv["scores"]}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@workspace
+def cross_validation():
+    result = core.get_cross_val_score()
+    return {"success": True, "cv": result["folds"], **result}
+
+
+@app.get("/api/permutation-importance")
+@workspace
+def permutation():
+    return {
+        "success": True,
+        "importance": core.get_permutation_importance().to_dict(orient="records"),
+    }
+
 
 @app.get("/api/misclassified")
-async def misclassified():
-    """Get misclassified samples."""
-    if core.model is None:
-        raise HTTPException(400, "No model trained")
-    if core.problem_type != "classification":
-        raise HTTPException(400, "Only for classification")
-    try:
-        df = core.get_misclassified_samples(max_samples=30)
-        samples = df.to_dict(orient="records")
-        return {"success": True, "samples": convert_to_native(samples)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@workspace
+def misclassified():
+    return {
+        "success": True,
+        "samples": core.get_misclassified_samples(30).to_dict(orient="records"),
+    }
+
 
 @app.get("/api/feature-importance-plot")
-async def feature_importance_plot():
-    """Get feature importance plot."""
-    if core.model is None:
-        raise HTTPException(400, "No model trained")
-    try:
-        img_b64 = core.plot_feature_importance()
-        return {"success": True, "image": img_b64}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@workspace
+def importance_plot():
+    return {"success": True, "image": core.plot_feature_importance()}
+
+
+@app.post("/api/chart/{chart_type}")
+@workspace
+def chart(chart_type: str, column: str | None = Query(None)):
+    core._require_data()
+    if column and column not in core.df:
+        raise ValueError("Column not found.")
+    if chart_type == "histogram":
+        if not column:
+            numeric = list(core.df.select_dtypes(include=np.number).columns)
+            if not numeric:
+                raise ValueError("Select a numeric column.")
+            column = numeric[0]
+        if not pd.api.types.is_numeric_dtype(core.df[column]):
+            raise ValueError("Histogram requires a numeric column.")
+        image = core.plot_histogram(column)
+    elif chart_type == "target":
+        image = core.plot_target_distribution(column or core.target_col)
+    else:
+        functions = {
+            "correlation": core.plot_correlation_heatmap,
+            "missing": core.plot_missing_heatmap,
+            "confusion": core.plot_confusion_matrix,
+            "roc": core.plot_roc_curve,
+            "pr": core.plot_precision_recall_curve,
+            "residuals": core.plot_residuals,
+        }
+        if chart_type not in functions:
+            raise ValueError("Unknown chart type.")
+        image = functions[chart_type]()
+    return {"success": True, "image": image}
+
+
+@app.get("/api/insights")
+@workspace
+def insights():
+    return {"success": True, "insights": core.generate_insights()}
+
 
 @app.get("/api/health-score")
-async def health_score():
-    """Get dataset health score."""
-    if core.df is None:
-        raise HTTPException(400, "No data loaded")
-    try:
-        health = core.get_dataset_health_score()
-        return {"success": True, "score": health["score"], "grade": health["grade"], "issues": health["issues"]}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/chart/pr")
-async def chart_pr():
-    """Generate Precision-Recall curve."""
-    if core.model is None:
-        raise HTTPException(400, "No model trained")
-    if core.problem_type != "classification":
-        raise HTTPException(400, "Only for classification")
-    try:
-        img_b64 = core.plot_precision_recall_curve()
-        return {"success": True, "image": img_b64}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@workspace
+def health():
+    return {"success": True, **core.get_dataset_health_score()}
 
 
-def run_web_app(host: str = "127.0.0.1", port: int = 8001):
-    """Run FastAPI app."""
-    print(f"\n🚀 DataYab Web Interface (FastAPI)")
-    print(f"{'='*50}")
-    print(f"📍 Open your browser: http://{host}:{port}")
-    print(f"{'='*50}\n")
+@app.get("/api/export/report")
+@workspace
+def export_report():
+    with tempfile.TemporaryDirectory(prefix="datayab-report-") as directory:
+        path = Path(directory) / "report.html"
+        core.export_report(path)
+        return Response(
+            path.read_bytes(),
+            media_type="text/html",
+            headers={
+                "Content-Disposition": 'attachment; filename="DataYab_Report.html"'
+            },
+        )
+
+
+def run_web_app(host="127.0.0.1", port=8001):
+    import uvicorn
+
+    print(f"DataYab local workspace: http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
 
 if __name__ == "__main__":
     run_web_app()

@@ -1,111 +1,62 @@
-# 📊 DataYab
+# DataYab
 
-**DataYab** is a local dataset analyzer that loads, cleans, explores, trains models, and makes predictions — all on your computer. No data ever leaves your machine.
+A local dataset workbench for exploring tables, reviewing data quality, comparing machine-learning models, and making predictions. Choose the browser dashboard, desktop application, or command line.
 
----
+## Quick start
 
-## 🚀 Quick Start
+Use **Python 3.13** (tested with 3.13.5) and a clean virtual environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
 
-```bash
-# Install
-pip install -r requirements.txt
-
-# Run
-python app.py
-
-# Then choose:
-# [1] Desktop App (full features)
-# [2] Web Browser (simple demo)
-# [3] Terminal (quick testing)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python app.py --web
 ```
 
----
+Open http://127.0.0.1:8001. Run `python app.py --tkinter` for desktop mode (also the default). Web assets are local: no CDN or API key required.
 
-## ✨ What It Does
-
-| Step | What You Do |
-|------|-------------|
-| 1. **Load** | Upload CSV, Excel, JSON, or Parquet |
-| 2. **Clean** | Click "Auto Clean" — handles missing values, duplicates, outliers |
-| 3. **Explore** | Generate charts and auto-observations |
-| 4. **Train** | Select target column → click "Train Model" |
-| 5. **Evaluate** | View metrics, confusion matrix, ROC curve |
-| 6. **Predict** | Enter values manually or upload a CSV batch |
-| 7. **Export** | Save HTML reports or trained models |
-
-### Advanced Features
-- **Feature Selection** — RF importance, mutual info, manual selection, PCA
-- **Model Comparison** — Train all models at once, see leaderboard
-- **Stacked Ensembles** — Combine two models with meta-learner choice
-- **Cross-Validation** — 5-fold stratified validation
-- **Permutation Importance** — Model-agnostic feature importance
-- **Health Score** — 0-100 score with A-F grade
-- **Batch Predictions** — Upload CSV, get predictions with confidence scores
-
----
-
-## 📁 Files
-
-| File | What It Does |
-|------|--------------|
-| `app.py` | Launcher (menu to choose interface) |
-| `backend/core.py` | ML engine |
-| `frontend/tinker.py` | Desktop GUI (7 tabs, dark mode) |
-| `frontend/web.py` | Web interface (port 8001) |
-| `data/data_profile.py` | Standalone data profiler |
-
----
-
-## 🖥️ Three Interfaces
-
-| Interface | Command | Best For |
-|-----------|---------|----------|
-| Desktop | `python app.py --tkinter` | Full features |
-| Web | `python app.py --web` | Quick demo |
-| CLI | `python app.py --cli` | Terminal testing |
-
----
-
-## 📦 Requirements
-
-```bash
-pip install pandas numpy scikit-learn matplotlib seaborn pillow joblib openpyxl fastapi uvicorn
+```powershell
+python app.py --cli --file "path/to/dataset.csv"
+python app.py --cli --file "path/to/dataset.csv" --target outcome --task classification
+python tools/profile_data.py "path/to/dataset.csv" --output "path/to/profile.json"
 ```
 
-Optional: `xgboost`, `imbalanced-learn`
+## Workflow
 
----
+1. Load CSV, Excel, JSON records, or Parquet. Web uploads are temporary and limited to 50 MB. Tables support up to 1,000,000 rows and 2,000 columns; flatten nested arrays/objects first.
+2. Inspect missing values, duplicates, distributions, correlations, and observations. Automatic cleaning removes duplicates and converts numeric text; other cleaning operations are explicit.
+3. Choose a target and train/test split. The web UI and CLI support an explicit classification/regression override; automatic detection uses a low-cardinality integer heuristic.
+4. Train or compare models, explore feature rankings, select original columns, or apply PCA. Data and feature changes clear outdated models.
+5. Evaluate holdout metrics and charts, then predict from raw inputs. Desktop mode also supports batch CSV prediction and model import/export.
 
-## 🎯 Example (5 minutes)
+## Modeling details
 
-```bash
-python app.py --tkinter
+Missing target rows are excluded. Imputation, scaling, categorical encoding, PCA, and sampling are fitted inside each training pipeline and cross-validation fold. Unknown categories are supported through ordinal encoding; assess whether its imposed ordering suits your data.
+
+Comparison ranks training cross-validation scores, separate from reserved holdout evaluation. Repeated exploration can still overfit choices: validate final decisions on fresh data. CV following manual feature exploration is conditional on those choices. SMOTE supports numeric inputs; use supported class weights for mixed categorical datasets. XGBoost is optional and outside the tested base installation.
+
+Exported packages contain preprocessing and raw-input schemas, enabling prediction without the original dataset. Imports require matching dependency versions; retrain old incomplete packages. Only open trusted model files: joblib/pickle can execute code.
+
+## Local workspace and data
+
+The loopback web server has **one shared workspace** across tabs and serializes operations. It is intended for one local user, not public multi-user hosting. Large datasets and model comparisons may take time and memory.
+
+Existing datasets and reports remain local, excluded from Git alongside model packages, environments, and caches. Files previously published remain in older Git history.
+
+## Structure
+
+- `app.py`: launcher and CLI
+- `backend/`: exploration, cleaning, and model pipelines
+- `frontend/`: desktop UI, web API, templates, and local assets
+- `tools/profile_data.py`: detailed JSON dataset profiler
+- `tests/`: synthetic-data regression tests
+
+## Validation
+
+```powershell
+python -m pip install pytest==9.1.1 httpx==0.28.1
+python -m pytest tests -q
+python -m pip check
 ```
 
-1. **Load** → `data/dataset_Telco-Customer-Churn.csv`
-2. **Clean** → Click "Auto Clean"
-3. **Train** → Select target `Churn` → Click "Split & Train"
-4. **Insights** → Click "Generate Insights"
-5. **Predict** → Enter values → See prediction
-
----
-
-## 📄 Outputs
-
-| Output | How |
-|--------|-----|
-| HTML Report | Insights tab → "Export HTML Report" |
-| Cleaned CSV | File menu → "Export Cleaned CSV" |
-| Trained Model | File menu → "Save Pipeline" |
-
----
-
-## ✅ Requirements
-
-- Python 3.8+
-- 4GB RAM
-- 500MB storage
-
----
-
-**Your data stays local. Always.** 🔒
+Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.

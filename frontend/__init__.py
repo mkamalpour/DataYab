@@ -1,4 +1,1 @@
-"""Frontend module for DataYab"""
-from .tinker import DataYabApp
-
-__all__ = ["DataYabApp"]
+"""DataYab desktop and web interfaces; imported only when launched."""
