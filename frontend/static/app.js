@@ -636,7 +636,7 @@ async function makePrediction() {
         v = r.result;
       const items = [`Prediction: ${v.prediction}`];
       if (v.confidence !== undefined)
-        items.push(`Confidence: ${number(v.confidence * 100, 2)}%`);
+        items.push(`Model probability (uncalibrated): ${number(v.confidence * 100, 2)}%`);
       Object.entries(v.probabilities || {}).forEach(([k, p]) =>
         items.push(`${k}: ${number(p * 100, 2)}%`),
       );

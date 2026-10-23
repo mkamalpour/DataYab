@@ -4,7 +4,7 @@ A local dataset workbench for exploring tables, reviewing data quality, comparin
 
 ## Quick start
 
-Use **Python 3.13** (tested with 3.13.5) and a clean virtual environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
+Use **Python 3.13** (tested with 3.13.5) from an existing compatible environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
 
 ```powershell
 conda activate base  # Or activate another existing compatible environment.
@@ -63,3 +63,5 @@ python -m pip check
 Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.
 
 Current lightweight check (Windows, existing Conda base / Python 3.13.5): **13 passed**. No dependency installs, model downloads, live publishing, or heavy datasets were used.
+
+Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.

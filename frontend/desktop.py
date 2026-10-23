@@ -2243,7 +2243,7 @@ class PredictTab(ttk.Frame):
         self.result_text.insert(tk.END, f"🔮 PREDICTION RESULT\n{'=' * 40}\n\n")
         self.result_text.insert(tk.END, f"Prediction: {result['prediction']}\n")
         if "confidence" in result:
-            self.result_text.insert(tk.END, f"Confidence: {result['confidence']:.2%}\n")
+            self.result_text.insert(tk.END, f"Model probability (uncalibrated): {result['confidence']:.2%}\n")
         if "probabilities" in result:
             self.result_text.insert(tk.END, "\nProbabilities:\n")
             for cls, prob in result["probabilities"].items():
