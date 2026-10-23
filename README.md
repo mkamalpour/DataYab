@@ -7,8 +7,8 @@ A local dataset workbench for exploring tables, reviewing data quality, comparin
 Use **Python 3.13** (tested with 3.13.5) and a clean virtual environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+conda activate base  # Or activate another existing compatible environment.
+# Optional dependency setup; requires explicit permission and connectivity.
 python -m pip install -r requirements.txt
 python app.py --web
 ```
@@ -54,9 +54,12 @@ Existing datasets and reports remain local, excluded from Git alongside model pa
 ## Validation
 
 ```powershell
+# Optional dependency setup; requires explicit permission and connectivity.
 python -m pip install pytest==9.1.1 httpx==0.28.1
 python -m pytest tests -q
 python -m pip check
 ```
 
 Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.
+
+Current lightweight check (Windows, existing Conda base / Python 3.13.5): **13 passed**. No dependency installs, model downloads, live publishing, or heavy datasets were used.
