@@ -1,5 +1,7 @@
 """Train-only preprocessing and complete prediction pipelines."""
 
+from .storage import atomic_target
+
 import copy
 import time
 from pathlib import Path
@@ -1001,7 +1003,8 @@ class ModelingMixin:
                 )
         result = pd.DataFrame(rows)
         if output_path:
-            result.to_csv(output_path, index=False)
+            with atomic_target(output_path) as temporary:
+                result.to_csv(temporary, index=False)
         return result
 
     def save_pipeline(self, file_path):
@@ -1018,7 +1021,8 @@ class ModelingMixin:
             "input_names": self._active_input_names,
             "feature_names": self.feature_names,
         }
-        joblib.dump(package, file_path)
+        with atomic_target(file_path) as temporary:
+            joblib.dump(package, temporary)
         return {"success": True, "path": str(file_path)}
 
     def load_pipeline(self, file_path):
@@ -1148,5 +1152,6 @@ class ModelingMixin:
             + "".join(rows)
             + "</html>"
         )
-        Path(file_path).write_text(document, encoding="utf-8")
+        with atomic_target(file_path) as temporary:
+            temporary.write_text(document, encoding="utf-8")
         return {"success": True, "path": str(file_path)}

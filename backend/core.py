@@ -1,5 +1,7 @@
 """Dataset exploration, explicit cleaning, and local model orchestration."""
 
+from .storage import atomic_target
+
 import io
 import base64
 
@@ -957,7 +959,8 @@ class DataYabCore(ModelingMixin):
 
     def export_cleaned_csv(self, file_path: str) -> dict:
         self._require_data()
-        self.df.to_csv(file_path, index=False)
+        with atomic_target(file_path) as temporary:
+            self.df.to_csv(temporary, index=False)
         self._log(f"Cleaned dataset exported to {file_path}")
         return {"success": True, "path": file_path}
 

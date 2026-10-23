@@ -171,3 +171,36 @@ def test_single_column_csv_is_not_split_on_letters(tmp_path):
     assert core.load_csv(path)["success"]
     assert list(core.df.columns) == ["amount"]
     assert core.df["amount"].tolist() == [10, 20, 30]
+
+
+@pytest.mark.parametrize("export", ["cleaned", "report", "pipeline"])
+def test_failed_export_preserves_existing_file(core, tmp_path, monkeypatch, export):
+    from backend import modeling
+    target = tmp_path / ("result.pkl" if export == "pipeline" else "result.csv")
+    target.write_bytes(b"previous completed export")
+    if export == "pipeline":
+        core.split_data("target")
+        core.train("Logistic Regression")
+        def broken_dump(package, path):
+            path.write_bytes(b"partial")
+            raise OSError("disk full")
+        monkeypatch.setattr(modeling.joblib, "dump", broken_dump)
+        action = core.save_pipeline
+    elif export == "report":
+        core.file_path = "synthetic.csv"
+        from pathlib import Path
+        def broken_text(path, *args, **kwargs):
+            path.write_bytes(b"partial")
+            raise OSError("disk full")
+        monkeypatch.setattr(Path, "write_text", broken_text)
+        action = core.export_report
+    else:
+        def broken_csv(frame, path, **kwargs):
+            path.write_bytes(b"partial")
+            raise OSError("disk full")
+        monkeypatch.setattr(pd.DataFrame, "to_csv", broken_csv)
+        action = core.export_cleaned_csv
+    with pytest.raises(OSError):
+        action(target)
+    assert target.read_bytes() == b"previous completed export"
+    assert list(tmp_path.iterdir()) == [target]
