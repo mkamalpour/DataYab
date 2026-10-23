@@ -65,3 +65,5 @@ Regression tests cover training-only preprocessing, model/PCA persistence, regre
 Current lightweight check (Windows, existing Conda base / Python 3.13.5): **13 passed**. No dependency installs, model downloads, live publishing, or heavy datasets were used.
 
 Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.
+
+No license file is included.
