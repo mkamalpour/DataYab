@@ -1,14 +1,18 @@
 # DataYab
 
-A local dataset workbench for exploring tables, reviewing data quality, comparing machine-learning models, and making predictions. Choose the browser dashboard, desktop application, or command line.
+Open a table, find data-quality problems, and compare prediction models without writing a notebook. DataYab runs locally in a browser, as a desktop app, or from the command line.
+
+## Try it first
+
+Open a CSV or Excel table and inspect the column types and missing values before training. Choose the target column and task, then compare held-out scores. Keep an untouched copy of your input and export results to a separate file.
 
 ## Quick start
 
 Use **Python 3.13** (tested with 3.13.5) from an existing compatible environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
 
 ```powershell
-conda activate base  # Or activate another existing compatible environment.
-# Optional dependency setup; requires explicit permission and connectivity.
+conda activate base  # Or use your existing compatible environment.
+# Install dependencies if they are not already available in your environment.
 python -m pip install -r requirements.txt
 python app.py --web
 ```
@@ -54,7 +58,7 @@ Existing datasets and reports remain local, excluded from Git alongside model pa
 ## Validation
 
 ```powershell
-# Optional dependency setup; requires explicit permission and connectivity.
+# Install dependencies if they are not already available in your environment.
 python -m pip install pytest==9.1.1 httpx==0.28.1
 python -m pytest tests -q
 python -m pip check
@@ -62,7 +66,7 @@ python -m pip check
 
 Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.
 
-Current lightweight check (Windows, existing Conda base / Python 3.13.5): **19 passed**. No dependency installs, model downloads, live publishing, or heavy datasets were used.
+Checked on Windows with Python 3.13.5 (Conda base): **19 tests passed**.
 
 Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.
 
