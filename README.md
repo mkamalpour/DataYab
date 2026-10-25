@@ -1,5 +1,7 @@
 # DataYab
 
+**[Explore the interactive project presentation](docs/overview.html)** — open locally in your browser; works offline.
+
 Open a table, find data-quality problems, and compare prediction models without writing a notebook. DataYab runs locally in a browser, as a desktop app, or from the command line.
 
 ## Try it first
