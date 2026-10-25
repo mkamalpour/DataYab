@@ -66,10 +66,12 @@ python -m pip check
 
 Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.
 
-Checked on Windows with Python 3.13.5 (Conda base): **19 tests passed**.
+Checked on Windows with Python 3.13.5 (Conda base): **23 tests passed**.
 
 Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.
 
 No license file is included.
 
 Core cleaned-data, batch-prediction, model and HTML-report exports are staged before replacing the destination. Failed writes preserve the previous export; locked destinations return an error rather than a false success.
+
+Failed model selection and cleaning restore the previous working state. Nested array cells are rejected before replacing a dataset, and summaries tolerate entirely missing columns.

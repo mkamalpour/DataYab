@@ -172,6 +172,8 @@ class DataYabCore(ModelingMixin):
 
     def encode_categorical(self, columns: list = None, method: str = "label") -> dict:
         self._require_data()
+        if method not in {'label', 'onehot'}:
+            return {'success': False, 'message': f'Unknown categorical encoding method: {method}'}
         if self.target_col:
             cols = columns or [
                 c
@@ -432,9 +434,11 @@ class DataYabCore(ModelingMixin):
         )
         if num_cols:
             stats = self.get_stats()
-            most_skewed = stats["skew"].abs().idxmax()
-            skew_val = round(stats.loc[most_skewed, "skew"], 2)
-            obs.append(f"Most skewed column: '{most_skewed}' (skew={skew_val}).")
+            skew = stats['skew'].replace([np.inf, -np.inf], np.nan).dropna()
+            if not skew.empty:
+                most_skewed = skew.abs().idxmax()
+                skew_val = round(skew.loc[most_skewed], 2)
+                obs.append(f"Most skewed column: '{most_skewed}' (skew={skew_val}).")
         if len(num_cols) >= 2:
             corr = self.get_correlation_matrix()
             flat = corr.abs().unstack()
@@ -451,7 +455,7 @@ class DataYabCore(ModelingMixin):
                 obs.append(f"Strongest correlation: '{c1}' ↔ '{c2}' (r={val:.3f}).")
         if self.target_col and self.target_col in self.df.columns:
             target_vals = self.df[self.target_col]
-            if target_vals.nunique() <= 20:
+            if 0 < target_vals.nunique() <= 20:
                 dist = target_vals.value_counts(normalize=True) * 100
                 top_class = dist.index[0]
                 obs.append(
@@ -1002,12 +1006,16 @@ def _dataset_edit(method):
             return method(self, *args, **kwargs)
         original = self.df.copy(deep=True)
         original_target = self.target_col
+        original_encoders = dict(self.label_encoders)
+        original_log = list(self.log)
         self._editing_dataset = True
         try:
             result = method(self, *args, **kwargs)
             if isinstance(result, dict) and result.get("success") is False:
                 self.df = original
                 self.target_col = original_target
+                self.label_encoders = original_encoders
+                self.log = original_log
                 return result
             if self.df.empty:
                 raise ValueError(
@@ -1016,6 +1024,8 @@ def _dataset_edit(method):
         except Exception:
             self.df = original
             self.target_col = original_target
+            self.label_encoders = original_encoders
+            self.log = original_log
             raise
         finally:
             self._editing_dataset = False

@@ -155,7 +155,7 @@ class ModelingMixin:
         df = df.copy()
         df.columns = [str(c) for c in df.columns]
         for col in df.select_dtypes(include="object"):
-            if df[col].map(lambda value: isinstance(value, (list, dict, set))).any():
+            if df[col].map(lambda value: isinstance(value, (list, dict, set, tuple, np.ndarray))).any():
                 raise ValueError(
                     "Nested values are not supported; flatten arrays and objects first."
                 )
@@ -498,6 +498,8 @@ class ModelingMixin:
         pipeline = self._training_pipeline(model, use_smote)
         start = time.monotonic()
         pipeline.fit(self._raw_train, self.y_train)
+        previous_models = dict(self.trained_models)
+        previous_available = list(self.available_models)
         self.trained_models[model_name] = {
             "model": pipeline,
             "feature_names": list(self.feature_names),
@@ -505,7 +507,13 @@ class ModelingMixin:
             "schema": self._schema_for(self._selected_input_names),
         }
         self.available_models = list(self.trained_models)
-        self.select_model(model_name)
+        try:
+            self.select_model(model_name)
+        except Exception:
+            self.trained_models.clear()
+            self.trained_models.update(previous_models)
+            self.available_models = previous_available
+            raise
         elapsed = round(time.monotonic() - start, 3)
         self._log(f"Trained {model_name} in {elapsed}s")
         return {
@@ -539,20 +547,26 @@ class ModelingMixin:
     def select_model(self, model_name):
         if model_name not in self.trained_models:
             raise ValueError("Choose a trained model.")
-        bundle = self.trained_models[model_name]
-        self.model = bundle["model"]
-        self.model_name = model_name
-        self.eval_model = None
-        self.eval_model_name = model_name
-        self._model_schema = copy.deepcopy(bundle["schema"])
-        self._active_input_names = list(bundle["input_names"])
-        self.feature_names = list(bundle["feature_names"])
-        self._selected_feature_names = list(self.feature_names)
-        self._selected_features_indices = None
-        self._used_feature_selection = False
-        self._compute_predictions()
-        self._extract_feature_importance()
-        return {"success": True, "model": model_name}
+        previous = self.__dict__.copy()
+        try:
+            bundle = self.trained_models[model_name]
+            self.model = bundle["model"]
+            self.model_name = model_name
+            self.eval_model = None
+            self.eval_model_name = model_name
+            self._model_schema = copy.deepcopy(bundle["schema"])
+            self._active_input_names = list(bundle["input_names"])
+            self.feature_names = list(bundle["feature_names"])
+            self._selected_feature_names = list(self.feature_names)
+            self._selected_features_indices = None
+            self._used_feature_selection = False
+            self._compute_predictions()
+            self._extract_feature_importance()
+            return {"success": True, "model": model_name}
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(previous)
+            raise
 
     def set_evaluation_model(self, model_name):
         return self.select_model(model_name)
