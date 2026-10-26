@@ -98,3 +98,9 @@ Failed model selection and cleaning restore the previous working state. Nested a
 
 See the [engineering audit](docs/ENGINEERING_AUDIT.md) for the dated test baseline,
 project assessment, environment assignment and remaining work.
+
+## Additional workflow improvements
+
+Classification metrics now include balanced accuracy, macro F1 and the training-majority baseline; regression includes a training-mean baseline and RMSE skill.
+
+Train a model and inspect Metrics in the web/desktop interface or CLI. Positive regression RMSE skill beats the baseline.

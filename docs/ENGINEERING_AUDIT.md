@@ -26,7 +26,7 @@ VS Code's local interpreter settings were aligned with the same assignment.
 
 ## Verification
 
-- **Automated tests:** 30 passed.
+- **Automated tests:** 32 passed; 0 reported skips; 0 private-report cases deselected.
 - **Startup check:** `run.cmd --check` passed from outside the repository;
   required startup modules were imported in the assigned environment.
 - **Tested runtime:** Windows; Conda base; Python 3.13.5.
@@ -58,3 +58,17 @@ for quality. These are proposed upgrades, not implemented features or measured s
 External assets: Synthetic tables suffice for the baseline; real schemas are needed for import validation.
 
 No root license file is set. No license was selected or changed.
+
+## Additional implementation pass
+
+Classification metrics now include balanced accuracy, macro F1 and the training-majority baseline; regression includes a training-mean baseline and RMSE skill.
+
+Use: Train a model and inspect Metrics in the web/desktop interface or CLI. Positive regression RMSE skill beats the baseline.
+
+Verification: the complete offline suite passed in the assigned **base**
+environment after this change (32 tests). Regression fixtures remain
+temporary/synthetic. Optional real-model/data quality and external integrations
+remain unverified. No packages, models or additional environments were installed.
+
+The earlier numeric scores are subjective historical assessments; new features do
+not automatically establish a higher score or production readiness.

@@ -45,6 +45,7 @@ from sklearn.feature_selection import mutual_info_classif, mutual_info_regressio
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
     precision_score,
     recall_score,
     f1_score,
@@ -801,6 +802,8 @@ class ModelingMixin:
         if self.problem_type == "classification":
             result = {
                 "accuracy": float(accuracy_score(self.y_test, pred)),
+                'balanced_accuracy': float(balanced_accuracy_score(self.y_test, pred)),
+                'macro_f1': float(f1_score(self.y_test, pred, average='macro', zero_division=0)),
                 "precision": float(
                     precision_score(
                         self.y_test, pred, average="weighted", zero_division=0
@@ -820,6 +823,9 @@ class ModelingMixin:
                     zero_division=0,
                 ),
             }
+            labels, counts = np.unique(self.y_train, return_counts=True)
+            majority = labels[np.argmax(counts)]
+            result['majority_baseline_accuracy'] = float(np.mean(np.asarray(self.y_test) == majority))
             if self.y_proba is not None:
                 result["roc_auc"] = (
                     float(roc_auc_score(self.y_test, self.y_proba[:, 1]))
@@ -836,6 +842,10 @@ class ModelingMixin:
                 "mse": mse,
                 "rmse": float(np.sqrt(mse)),
             }
+            baseline = np.full(len(self.y_test), float(np.mean(self.y_train)))
+            result['baseline_mae'] = float(mean_absolute_error(self.y_test, baseline))
+            result['baseline_rmse'] = float(np.sqrt(mean_squared_error(self.y_test, baseline)))
+            result['rmse_skill'] = 1 - result['rmse'] / result['baseline_rmse'] if result['baseline_rmse'] else None
         self.metrics = result
         return result
 
