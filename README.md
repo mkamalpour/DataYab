@@ -11,16 +11,18 @@ Open a CSV or Excel table and inspect the column types and missing values before
 <details>
 <summary>Using the existing managed Windows workspace</summary>
 
-Assigned environment: **base** — Python **3.13.5**, using the existing Conda environment `base`. Open `Workspaces/DataYab.code-workspace` from the workspace folder to select its interpreter.
-
-From this repository folder in PowerShell:
+Assigned environment: **base**. From this repository folder in PowerShell:
 
 ```powershell
-& '..\Launchers\DataYab.cmd' --check --deep
-& '..\Launchers\DataYab.cmd'
+.\run.cmd --check
+.\run.cmd
 ```
 
-The launcher activates the assigned environment and checks dependencies. It does not install packages or download models. These launchers belong to the managed parent workspace; for a standalone clone, follow the setup instructions below in your own compatible environment. Keep optional model/provider prerequisites separate from the offline examples.
+The repo-local launcher selects `G:\AnaConda\install`
+and imports required startup modules. It installs nothing and downloads
+no models. On a standalone clone where that interpreter is absent, it uses your
+active `python`; activate a compatible environment first. `--check` reports the
+actual interpreter; it does not validate optional models or every workflow.
 
 </details>
 
@@ -93,3 +95,6 @@ No license file is included.
 Core cleaned-data, batch-prediction, model and HTML-report exports are staged before replacing the destination. Failed writes preserve the previous export; locked destinations return an error rather than a false success.
 
 Failed model selection and cleaning restore the previous working state. Nested array cells are rejected before replacing a dataset, and summaries tolerate entirely missing columns.
+
+See the [engineering audit](docs/ENGINEERING_AUDIT.md) for the dated test baseline,
+project assessment, environment assignment and remaining work.
