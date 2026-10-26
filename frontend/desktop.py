@@ -2231,8 +2231,6 @@ class PredictTab(ttk.Frame):
         input_dict = {}
         for feat, entry in self.input_entries.items():
             val = entry.get().strip()
-            if val == "":
-                val = "0"
             input_dict[feat] = val
         self.app.run_threaded(
             lambda: self.app.core.predict(input_dict), self.display_prediction

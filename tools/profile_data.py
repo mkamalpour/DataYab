@@ -7,14 +7,18 @@ from pathlib import Path
 
 def convert_to_serializable(obj):
     """Convert numpy/pandas types to Python native types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {str(key): convert_to_serializable(value) for key, value in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [convert_to_serializable(value) for value in obj]
     if isinstance(obj, (np.bool_, bool)):
         return bool(obj)
     if isinstance(obj, (np.integer, np.int64, np.int32)):
         return int(obj)
-    if isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
+    if isinstance(obj, (float, np.floating)):
+        return float(obj) if np.isfinite(obj) else None
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return convert_to_serializable(obj.tolist())
     if pd.isna(obj):
         return None
     return obj
@@ -128,7 +132,8 @@ def ultimate_profile(file_path):
             col_info["top_values"] = {str(k): v for k, v in top.items()}
 
         # Numeric column statistics
-        if pd.api.types.is_numeric_dtype(col_data) and len(non_null) > 0:
+        if (pd.api.types.is_numeric_dtype(col_data)
+                and not pd.api.types.is_bool_dtype(col_data) and len(non_null) > 0):
             q1 = non_null.quantile(0.25)
             q3 = non_null.quantile(0.75)
             iqr = q3 - q1
@@ -213,7 +218,7 @@ def ultimate_profile(file_path):
     }
 
     print(f"✅ Profiling complete in {profile['summary']['profile_time_seconds']}s")
-    return profile
+    return convert_to_serializable(profile)
 
 
 def print_quick_summary(profile):
@@ -250,6 +255,6 @@ if __name__ == "__main__":
         parser.error("Output already exists; choose a new filename.")
     profile = ultimate_profile(args.dataset)
     args.output.write_text(
-        json.dumps(profile, indent=2, default=convert_to_serializable), encoding="utf-8"
+        json.dumps(profile, indent=2, default=convert_to_serializable, allow_nan=False), encoding="utf-8"
     )
     print_quick_summary(profile)

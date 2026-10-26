@@ -101,7 +101,8 @@ class DataYabCore(ModelingMixin):
             self.df.dropna(subset=cols, inplace=True)
         elif strategy == "drop_cols":
             thresh = int(len(self.df) * 0.5) + 1
-            self.df.dropna(axis=1, thresh=thresh, inplace=True)
+            dropped = [c for c in cols if self.df[c].notna().sum() < thresh]
+            self.df.drop(columns=dropped, inplace=True)
         elif strategy == "mean":
             for c in cols:
                 if pd.api.types.is_numeric_dtype(self.df[c]):
@@ -137,6 +138,7 @@ class DataYabCore(ModelingMixin):
                 self.df[numeric_cols] = imputer.fit_transform(self.df[numeric_cols])
         elif strategy == "iterative":
             # Iterative imputation (MICE-like)
+            from sklearn.experimental import enable_iterative_imputer  # noqa: F401
             from sklearn.impute import IterativeImputer
 
             numeric_cols = [
@@ -802,7 +804,8 @@ class DataYabCore(ModelingMixin):
             insights.append("\n🎯 TARGET ANALYSIS")
             target_data = self.df[self.target_col]
             n_unique = target_data.nunique()
-            if self.problem_type == "classification":
+            problem_type = self.problem_type or self.auto_detect_problem_type(self.target_col)
+            if problem_type == "classification":
                 dist = target_data.value_counts()
                 pcts = (dist / len(self.df) * 100).round(1)
                 insights.append("  • Problem type: CLASSIFICATION")

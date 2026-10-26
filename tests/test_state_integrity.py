@@ -44,3 +44,70 @@ def test_observations_handle_entirely_missing_numeric_and_target_columns():
     core.target_col='target'
     result=core.generate_observations()
     assert result and any('missing' in item.lower() for item in result)
+
+
+def test_drop_missing_columns_respects_selection_and_protects_default_target():
+    core = DataYabCore()
+    original = pd.DataFrame({'keep': [1., np.nan, np.nan, np.nan],
+                             'drop': [2., np.nan, np.nan, np.nan],
+                             'target': [0., np.nan, np.nan, np.nan]})
+    core._set_dataset(original)
+    core.target_col = 'target'
+    core.handle_missing('drop_cols', columns=['drop'])
+    pd.testing.assert_frame_equal(core.df, original.drop(columns=['drop']))
+    core.handle_missing('drop_cols')
+    pd.testing.assert_frame_equal(core.df, original[['target']])
+    assert core.target_col == 'target'
+
+
+def test_iterative_missing_strategy_is_usable_without_external_import_setup():
+    core = DataYabCore()
+    core._set_dataset(pd.DataFrame({'a': [1., 2., np.nan, 4.], 'b': [2., 4., 6., 8.]}))
+    result = core.handle_missing('iterative')
+    assert result['success'] and not core.df.isna().any().any()
+    assert core.df.loc[2, 'a'] == pytest.approx(3., abs=.01)
+
+
+
+def test_insights_after_cleaning_infers_categorical_target_without_a_training_split():
+    core = DataYabCore()
+    core._set_dataset(pd.DataFrame({'x': [1, 2, 3, 4], 'target': ['a', 'b', 'a', 'b']}))
+    core.auto_clean(target_col='target')
+    assert core.problem_type == ''
+    insights = core.generate_insights()
+    assert any('CLASSIFICATION' in line for line in insights)
+    assert core._raw_train is None
+
+
+def test_failed_selected_drop_preserves_entire_trained_state(trained):
+    original = trained.df.copy(deep=True)
+    model = trained.model
+    signature = trained._split_signature
+    raw_train = trained._raw_train
+    logs = trained.get_log()
+    prediction = trained.predict({'x': 3, 'group': 'a'})
+    with pytest.raises(KeyError):
+        trained.handle_missing('drop_cols', ['group', 'missing_column'])
+    pd.testing.assert_frame_equal(trained.df, original)
+    assert trained.model is model and trained._raw_train is raw_train
+    assert trained._split_signature == signature
+    assert trained.get_log() == logs and trained.target_col == 'target'
+    assert trained.predict({'x': 3, 'group': 'a'}) == prediction
+
+
+
+def test_desktop_blank_numeric_prediction_matches_backend_imputation():
+    from types import SimpleNamespace
+    from frontend.desktop import PredictTab
+    core = DataYabCore()
+    core._set_dataset(pd.DataFrame({'x': np.arange(40), 'target': 100 + np.arange(40)}))
+    core.split_data('target', problem_type='regression')
+    core.train('Linear Regression')
+    expected = core.predict({'x': ''})
+    assert expected['prediction'] != pytest.approx(core.predict({'x': '0'})['prediction'])
+    results = []
+    tab = SimpleNamespace(app=SimpleNamespace(core=core, run_threaded=lambda work, done: done(work())),
+                          input_entries={'x': SimpleNamespace(get=lambda: '')},
+                          display_prediction=results.append)
+    PredictTab.predict_manual(tab)
+    assert results == [expected]
