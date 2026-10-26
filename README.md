@@ -8,6 +8,22 @@ Open a table, find data-quality problems, and compare prediction models without 
 
 Open a CSV or Excel table and inspect the column types and missing values before training. Choose the target column and task, then compare held-out scores. Keep an untouched copy of your input and export results to a separate file.
 
+<details>
+<summary>Using the existing managed Windows workspace</summary>
+
+Assigned environment: **base** — Python **3.13.5**, using the existing Conda environment `base`. Open `Workspaces/DataYab.code-workspace` from the workspace folder to select its interpreter.
+
+From this repository folder in PowerShell:
+
+```powershell
+& '..\Launchers\DataYab.cmd' --check --deep
+& '..\Launchers\DataYab.cmd'
+```
+
+The launcher activates the assigned environment and checks dependencies. It does not install packages or download models. These launchers belong to the managed parent workspace; for a standalone clone, follow the setup instructions below in your own compatible environment. Keep optional model/provider prerequisites separate from the offline examples.
+
+</details>
+
 ## Quick start
 
 Use **Python 3.13** (tested with 3.13.5) from an existing compatible environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
