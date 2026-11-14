@@ -28,7 +28,7 @@
               Clean Data
             </button>
             <button type="button" class="nav-link" data-section="feature">
-              Feature Selection
+              Features
             </button>
             <button type="button" class="nav-link" data-section="train">
               Train Model
@@ -82,13 +82,13 @@
                   </p>
                   <p style="color: #666">or <strong>click to browse</strong></p>
                   <small style="color: #526172"
-                    >CSV, Excel, JSON, Parquet. Upload limit: 50 MB.</small
+                    >CSV, Excel, JSON, Parquet, ARR, ARFF. Upload limit: 50 MB.</small
                   >
                   <input
                     type="file"
                     id="fileInput"
                     aria-label="Dataset file"
-                    accept=".csv,.xlsx,.xls,.json,.parquet"
+                    accept=".csv,.xlsx,.xls,.json,.parquet,.arr,.arff"
                     style="display: none"
                   />
                 </div>
@@ -120,6 +120,50 @@
                       </tr>
                     </tbody>
                   </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">Dataset Quality</div>
+              <div class="card-body">
+                <div id="qualityResult" class="alert alert-info">
+                  Upload a dataset to inspect duplicates, missing values, class
+                  balance and redundant columns.
+                </div>
+                <div class="row mt-3">
+                  <div class="col-md-3 mb-2">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="loadQuality()"
+                    >
+                      Refresh Quality Report
+                    </button>
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="cleanData('remove_duplicates')"
+                    >
+                      Remove Duplicate Rows
+                    </button>
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="exportCleaned('csv')"
+                    >
+                      Export Cleaned CSV
+                    </button>
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <button
+                      class="btn btn-outline-primary w-100"
+                      onclick="exportCleaned('arff')"
+                    >
+                      Export Cleaned ARFF
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -221,31 +265,75 @@
             </div>
           </div>
 
-          <!-- ==================== FEATURE SELECTION SECTION ==================== -->
+          <!-- ==================== FEATURES SECTION ==================== -->
           <div class="section" id="feature">
             <div class="card">
               <div class="card-header">Feature Selection</div>
               <div class="card-body">
+                <p class="help">
+                  Choose which original columns feed the model. Selection uses
+                  training rows only and never changes the stored dataset.
+                </p>
                 <div class="row mb-3">
-                  <div class="col-md-6">
-                    <button
-                      class="btn btn-outline-primary w-100"
-                      onclick="getRFImportance()"
+                  <div class="col-md-5">
+                    <label class="form-label" for="selectionMethod"
+                      >Method</label
                     >
-                      Random Forest Importance
+                    <select class="form-select" id="selectionMethod">
+                      <option value="rf">Random Forest importance</option>
+                      <option value="mutual_info">Mutual information</option>
+                      <option value="anova">ANOVA F-test</option>
+                      <option value="correlation">Correlation with target</option>
+                      <option value="rfe">
+                        Recursive feature elimination
+                      </option>
+                      <option value="variance">Remove constant columns</option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" for="selectionCount"
+                      >Keep top k</label
+                    >
+                    <input
+                      type="number"
+                      class="form-control"
+                      id="selectionCount"
+                      value="10"
+                      min="1"
+                    />
+                  </div>
+                  <div class="col-md-4 d-flex align-items-end">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="applyFeatureSelection()"
+                    >
+                      Apply Selection
                     </button>
                   </div>
-                  <div class="col-md-6">
+                </div>
+                <div class="row mb-3">
+                  <div class="col-md-4">
                     <button
                       class="btn btn-outline-primary w-100"
-                      onclick="getMutualInfo()"
+                      onclick="rankFeatures()"
                     >
-                      Mutual Information
+                      Show Feature Scores
+                    </button>
+                  </div>
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-outline-secondary w-100"
+                      onclick="restoreFeatureSelection()"
+                    >
+                      Restore All Columns
                     </button>
                   </div>
                 </div>
                 <div class="row mb-3">
                   <div class="col-md-8" style="flex: 2; min-width: 0">
+                    <label class="form-label" for="manualFeatures"
+                      >Manual column list</label
+                    >
                     <input
                       type="text"
                       class="form-control"
@@ -254,7 +342,7 @@
                       placeholder="feature1, feature2, feature3 (comma-separated)"
                     />
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-4 d-flex align-items-end">
                     <button
                       class="btn btn-secondary w-100"
                       onclick="applyManualSelection()"
@@ -263,43 +351,73 @@
                     </button>
                   </div>
                 </div>
+                <div id="selectionResult" class="mt-3"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">Feature Extraction</div>
+              <div class="card-body">
+                <p class="help">
+                  Create new components from the selected columns. The
+                  transformer is fitted inside each training fold, then applied
+                  to the holdout rows. Extraction is separate from selection.
+                </p>
                 <div class="row mb-3">
-                  <div class="col-md-6">
-                    <div class="input-group">
-                      <input
-                        type="number"
-                        class="form-control"
-                        id="pcaComponents"
-                        aria-label="Number of PCA components"
-                        value="2"
-                        min="2"
-                        max="20"
-                      />
-                      <button
-                        class="btn btn-outline-primary"
-                        onclick="applyPCA()"
-                      >
-                        Apply PCA
-                      </button>
-                    </div>
-                  </div>
-                  <div class="col-md-6">
-                    <button
-                      class="btn btn-outline-secondary w-100"
-                      onclick="restoreFromPCA()"
+                  <div class="col-md-5">
+                    <label class="form-label" for="extractionMethod"
+                      >Method</label
                     >
-                      Restore from PCA
+                    <select class="form-select" id="extractionMethod">
+                      <option value="pca">
+                        Principal Component Analysis (PCA)
+                      </option>
+                      <option value="svd">Truncated SVD</option>
+                      <option value="lda">
+                        Linear Discriminant Analysis (classification only)
+                      </option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" for="extractionComponents"
+                      >Components</label
+                    >
+                    <input
+                      type="number"
+                      class="form-control"
+                      id="extractionComponents"
+                      value="2"
+                      min="1"
+                    />
+                  </div>
+                  <div class="col-md-4 d-flex align-items-end">
+                    <button
+                      class="btn btn-primary w-100"
+                      onclick="applyFeatureExtraction()"
+                    >
+                      Apply Extraction
                     </button>
                   </div>
                 </div>
-                <div id="featureImportanceResult" class="mt-3"></div>
-                <div
-                  id="featureStatus"
-                  class="alert alert-info mt-2"
-                  style="display: none"
-                ></div>
+                <div class="row mb-3">
+                  <div class="col-md-4">
+                    <button
+                      class="btn btn-outline-secondary w-100"
+                      onclick="restoreFeatureExtraction()"
+                    >
+                      Restore Original Features
+                    </button>
+                  </div>
+                </div>
+                <div id="extractionResult" class="mt-3"></div>
               </div>
             </div>
+
+            <div
+              id="featureStatus"
+              class="alert alert-info mt-2"
+              style="display: none"
+            ></div>
           </div>
 
           <!-- ==================== TRAIN SECTION ==================== -->

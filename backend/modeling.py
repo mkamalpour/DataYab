@@ -41,7 +41,15 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.naive_bayes import GaussianNB
-from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+from sklearn.feature_selection import (
+    mutual_info_classif,
+    mutual_info_regression,
+    f_classif,
+    f_regression,
+    RFE,
+)
+from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     accuracy_score,
@@ -108,6 +116,39 @@ def runtime_versions():
     }
 
 
+def _array_to_frame(value):
+    """Turn a NumPy array (plain or structured) into a tabular DataFrame."""
+    if isinstance(value, np.ndarray) and value.dtype.names:
+        return pd.DataFrame.from_records(value)
+    array = np.asarray(value)
+    if array.ndim == 1:
+        return pd.DataFrame({"value": array})
+    if array.ndim == 2:
+        return pd.DataFrame(
+            array, columns=[f"column_{i}" for i in range(1, array.shape[1] + 1)]
+        )
+    raise ValueError("Array files must contain a 1D or 2D array.")
+
+
+def _arff_frame(file_path):
+    """Read a Weka ARFF file, decoding nominal labels and numeric values."""
+    from scipy.io import arff
+
+    data, _ = arff.loadarff(file_path)
+    frame = pd.DataFrame(data)
+    for column in frame.columns:
+        values = frame[column].map(
+            lambda value: value.decode("utf-8", "replace")
+            if isinstance(value, bytes)
+            else value
+        ).replace("?", np.nan)
+        numeric = pd.to_numeric(values, errors="coerce")
+        frame[column] = (
+            numeric if values.notna().sum() == numeric.notna().sum() else values
+        )
+    return frame
+
+
 class ModelingMixin:
     def _reset_learning(self):
         self._invalidate_models()
@@ -118,6 +159,8 @@ class ModelingMixin:
         self.feature_names = []
         self._selected_input_names = None
         self._pca_components = None
+        self._extraction_method = None
+        self._extraction_components = None
         self._split_signature = None
         self.target_encoder = None
         self.scaler = None
@@ -240,6 +283,41 @@ class ModelingMixin:
         except Exception as error:
             return {"success": False, "message": f"Parquet load failed: {error}"}
 
+    def load_arr(self, file_path):
+        """Load .arr files: NumPy arrays, Arrow/Feather tables, or delimited text."""
+        try:
+            with open(file_path, "rb") as stream:
+                magic = stream.read(8)
+            if magic.startswith(b"\x93NUMPY"):
+                return self._set_dataset(
+                    _array_to_frame(np.load(file_path, allow_pickle=False)), file_path
+                )
+            if magic.startswith(b"ARROW1") or magic.startswith(b"FEA1"):
+                import pyarrow as pa
+
+                if magic.startswith(b"FEA1"):
+                    return self._set_dataset(pd.read_feather(file_path), file_path)
+                try:
+                    with pa.memory_map(str(file_path), "r") as source:
+                        table = pa.ipc.open_file(source).read_all()
+                except Exception:
+                    return self._set_dataset(pd.read_feather(file_path), file_path)
+                return self._set_dataset(table.to_pandas(), file_path)
+            result = self.load_csv(file_path)
+            if not result["success"]:
+                detail = result.get("message", "").split(": ", 1)[-1]
+                return {"success": False, "message": f"Array load failed: {detail}"}
+            return result
+        except Exception as error:
+            return {"success": False, "message": f"Array load failed: {error}"}
+
+    def load_arff(self, file_path):
+        """Load a Weka ARFF dataset, including nominal and numeric attributes."""
+        try:
+            return self._set_dataset(_arff_frame(file_path), file_path)
+        except Exception as error:
+            return {"success": False, "message": f"ARFF load failed: {error}"}
+
     def load_file(self, file_path):
         loader = {
             ".csv": self.load_csv,
@@ -247,13 +325,15 @@ class ModelingMixin:
             ".xls": self.load_excel,
             ".json": self.load_json,
             ".parquet": self.load_parquet,
+            ".arr": self.load_arr,
+            ".arff": self.load_arff,
         }.get(Path(file_path).suffix.lower())
         return (
             loader(file_path)
             if loader
             else {
                 "success": False,
-                "message": "Supported: CSV, XLSX, XLS, JSON, Parquet.",
+                "message": "Supported: CSV, XLSX, XLS, JSON, Parquet, ARR, ARFF.",
             }
         )
 
@@ -397,9 +477,10 @@ class ModelingMixin:
             "feature_names": self.feature_names,
         }
 
-    def _preprocessor(self):
+    def _preprocessor(self, names=None):
+        names = self._selected_input_names if names is None else names
         transformers = []
-        for i, col in enumerate(self._selected_input_names):
+        for i, col in enumerate(names):
             if col in self._numeric_columns:
                 steps = [
                     (
@@ -438,25 +519,44 @@ class ModelingMixin:
             transformers, remainder="drop", verbose_feature_names_out=False
         )
 
+    def _extraction_transformer(self):
+        """Fresh extraction transformer for the active method, or None."""
+        method = self._extraction_method
+        if method is None:
+            return None
+        components = self._extraction_components
+        if method == "pca":
+            return PCA(n_components=components, random_state=42)
+        if method == "svd":
+            return TruncatedSVD(n_components=components, random_state=42)
+        if method == "lda":
+            return LinearDiscriminantAnalysis(n_components=components)
+        raise ValueError(f"Unknown feature extraction method: {method}")
+
     def _refresh_feature_view(self):
         prep = self._preprocessor()
         self.X_train = prep.fit_transform(self._raw_train)
         self.X_test = prep.transform(self._raw_test)
         self.feature_names = list(self._selected_input_names)
-        if self._pca_components is not None:
-            pca = PCA(n_components=self._pca_components, random_state=42)
-            self.X_train = pca.fit_transform(self.X_train)
-            self.X_test = pca.transform(self.X_test)
-            self.feature_names = [f"PC{i + 1}" for i in range(self._pca_components)]
-            return pca
-        return None
+        transformer = self._extraction_transformer()
+        if transformer is None:
+            return None
+        if isinstance(transformer, LinearDiscriminantAnalysis):
+            self.X_train = transformer.fit_transform(self.X_train, self.y_train)
+        else:
+            self.X_train = transformer.fit_transform(self.X_train)
+        self.X_test = transformer.transform(self.X_test)
+        prefix = {"pca": "PC", "svd": "SVD", "lda": "LD"}[self._extraction_method]
+        self.feature_names = [
+            f"{prefix}{i + 1}" for i in range(self.X_train.shape[1])
+        ]
+        return transformer
 
     def _training_pipeline(self, estimator, use_smote=False):
         steps = [("prepare", self._preprocessor())]
-        if self._pca_components is not None:
-            steps.append(
-                ("pca", PCA(n_components=self._pca_components, random_state=42))
-            )
+        transformer = self._extraction_transformer()
+        if transformer is not None:
+            steps.append(("extract", transformer))
         if use_smote:
             if self.problem_type != "classification":
                 raise ValueError("SMOTE is only for classification.")
@@ -575,54 +675,232 @@ class ModelingMixin:
     def get_evaluation_model(self):
         return self.model_name
 
-    def select_features_manual(self, feature_list):
+    # ---- Feature selection (which original columns feed the model) ----
+    def _clear_extraction_state(self):
+        self._extraction_method = None
+        self._extraction_components = None
+        self._pca_components = None
+
+    def _selection_matrix(self):
         if self._raw_train is None:
             raise ValueError("Split data first.")
+        names = list(self._all_input_names)
+        prep = self._preprocessor(names)
+        return prep.fit_transform(self._raw_train[names]), names
+
+    def _feature_score_series(self, method):
+        method = str(method).lower()
+        X, names = self._selection_matrix()
+        if method == "rf":
+            model = (
+                RandomForestClassifier(n_estimators=80, random_state=42, n_jobs=1)
+                if self.problem_type == "classification"
+                else RandomForestRegressor(
+                    n_estimators=80, random_state=42, n_jobs=1
+                )
+            )
+            model.fit(X, self.y_train)
+            scores = model.feature_importances_
+        elif method == "mutual_info":
+            function = (
+                mutual_info_classif
+                if self.problem_type == "classification"
+                else mutual_info_regression
+            )
+            scores = function(
+                X,
+                self.y_train,
+                random_state=42,
+                n_neighbors=min(3, len(self.y_train) - 1),
+            )
+        elif method == "anova":
+            function = (
+                f_classif
+                if self.problem_type == "classification"
+                else f_regression
+            )
+            scores = np.zeros(X.shape[1])
+            variable = np.flatnonzero(np.var(X, axis=0) > 0)
+            if len(variable):
+                values = function(X[:, variable], self.y_train)[0]
+                scores[variable] = np.nan_to_num(
+                    values, nan=0.0, posinf=0.0, neginf=0.0
+                )
+        elif method == "correlation":
+            target = np.asarray(self.y_train, dtype=float)
+            scores = []
+            for index in range(X.shape[1]):
+                column = np.asarray(X[:, index], dtype=float)
+                scores.append(
+                    abs(np.corrcoef(column, target)[0, 1])
+                    if column.std() > 0 and target.std() > 0
+                    else 0.0
+                )
+            scores = np.nan_to_num(np.asarray(scores), nan=0.0)
+        else:
+            raise ValueError(
+                "Ranking methods: rf, mutual_info, anova, correlation."
+            )
+        return pd.Series(scores, index=names).sort_values(ascending=False)
+
+    def get_feature_scores(self, method="rf", top_n=20):
+        """Rank original input columns using a filter or model-based method."""
+        return self._feature_score_series(method).head(top_n)
+
+    def _validate_input_names(self, names):
         if (
-            not feature_list
-            or len(set(feature_list)) != len(feature_list)
-            or any(f not in self._all_input_names for f in feature_list)
+            not names
+            or len(set(names)) != len(names)
+            or any(name not in self._all_input_names for name in names)
         ):
             raise ValueError(
-                "Choose unique original input columns, not PCA component names."
+                "Choose unique original input columns, not extracted component names."
             )
+
+    def _set_selected_names(self, names):
         self._invalidate_models()
-        self._selected_input_names = list(feature_list)
-        self._pca_components = None
+        self._selected_input_names = list(names)
         self._selection_data_driven = True
+        self._clear_extraction_state()
         self._refresh_feature_view()
         self._selected_feature_names = list(self.feature_names)
         self._log(
             "Feature choices changed; models cleared. CV is conditional on manually explored feature choices. Holdout not used."
         )
-        return True
 
-    def apply_pca(self, n_components=2):
+    def apply_selection(self, method="rf", k=10, features=None):
+        """Select original input columns; extracted components are not selectable."""
         if self._raw_train is None:
             raise ValueError("Split data first.")
-        maximum = min(len(self._selected_input_names), len(self.y_train))
-        if type(n_components) is not int or not 1 <= n_components <= maximum:
-            raise ValueError(f"PCA components must be 1-{maximum}.")
-        self._invalidate_models()
-        self._pca_components = n_components
-        pca = self._refresh_feature_view()
-        self._selected_feature_names = list(self.feature_names)
+        method = str(method).lower()
+        if method == "all":
+            return self.restore_selection()
+        if method == "manual":
+            if not isinstance(features, list) or not features:
+                raise ValueError("Provide a list of feature names.")
+            names = [str(name) for name in features]
+            self._validate_input_names(names)
+        elif method == "variance":
+            names = [
+                column
+                for column in self._all_input_names
+                if self._raw_train[column].nunique(dropna=True) > 1
+            ]
+            if not names:
+                raise ValueError("Every input column is constant.")
+        elif method in ("rf", "mutual_info", "anova", "correlation"):
+            if type(k) is not int or not 1 <= k <= len(self._all_input_names):
+                raise ValueError(
+                    f"Keep between 1 and {len(self._all_input_names)} features."
+                )
+            names = list(self._feature_score_series(method).head(k).index)
+        elif method == "rfe":
+            if type(k) is not int or not 1 <= k <= len(self._all_input_names):
+                raise ValueError(
+                    f"Keep between 1 and {len(self._all_input_names)} features."
+                )
+            X, names = self._selection_matrix()
+            estimator = (
+                LogisticRegression(max_iter=2000, random_state=42)
+                if self.problem_type == "classification"
+                else Ridge(alpha=1.0)
+            )
+            selector = RFE(estimator, n_features_to_select=k).fit(X, self.y_train)
+            names = [names[i] for i in np.flatnonzero(selector.support_)]
+        else:
+            raise ValueError(
+                "Selection methods: rf, mutual_info, anova, correlation, rfe, variance, manual."
+            )
+        self._set_selected_names(names)
+        dropped = [name for name in self._all_input_names if name not in names]
         return {
-            "explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
-            "cumulative_variance": pca.explained_variance_ratio_.cumsum().tolist(),
-            "n_components": n_components,
+            "success": True,
+            "method": method,
+            "selected": list(self._selected_input_names),
+            "dropped": dropped,
+            "total": len(self._selected_input_names),
         }
 
-    def restore_from_pca(self):
+    def select_features_manual(self, feature_list):
+        return self.apply_selection("manual", features=feature_list)
+
+    def restore_selection(self):
         if self._raw_train is None:
             raise ValueError("Split data first.")
         self._invalidate_models()
         self._selected_input_names = list(self._all_input_names)
-        self._pca_components = None
         self._selection_data_driven = False
+        self._clear_extraction_state()
         self._refresh_feature_view()
         self._selected_feature_names = list(self.feature_names)
-        return True
+        return {
+            "success": True,
+            "selected": list(self._selected_input_names),
+            "total": len(self._selected_input_names),
+        }
+
+    # ---- Feature extraction (new components fitted inside each fold) ----
+    def apply_extraction(self, method="pca", n_components=2):
+        if self._raw_train is None:
+            raise ValueError("Split data first.")
+        method = str(method).lower()
+        if method not in ("pca", "svd", "lda"):
+            raise ValueError("Extraction methods: pca, svd, lda.")
+        if type(n_components) is not int or n_components < 1:
+            raise ValueError("Components must be a positive whole number.")
+        limit = min(len(self._selected_input_names), len(self.y_train))
+        if method == "lda":
+            if self.problem_type != "classification":
+                raise ValueError("LDA extraction is only for classification.")
+            limit = min(limit, len(np.unique(self.y_train)) - 1)
+        if limit < 1 or n_components > limit:
+            raise ValueError(
+                f"{method.upper()} components must be between 1 and {max(limit, 0)}."
+            )
+        self._invalidate_models()
+        self._extraction_method = method
+        self._extraction_components = n_components
+        self._pca_components = n_components if method == "pca" else None
+        transformer = self._refresh_feature_view()
+        self._selected_feature_names = list(self.feature_names)
+        info = {
+            "success": True,
+            "method": method,
+            "n_components": len(self.feature_names),
+            "features": list(self.feature_names),
+        }
+        if hasattr(transformer, "explained_variance_ratio_"):
+            ratio = np.asarray(transformer.explained_variance_ratio_)
+            info["explained_variance_ratio"] = [float(v) for v in ratio]
+            info["cumulative_variance"] = [float(v) for v in ratio.cumsum()]
+            info["total_variance"] = float(ratio.sum())
+        return info
+
+    def restore_extraction(self):
+        if self._raw_train is None:
+            raise ValueError("Split data first.")
+        self._invalidate_models()
+        self._clear_extraction_state()
+        self._refresh_feature_view()
+        self._selected_feature_names = list(self.feature_names)
+        return {"success": True, "features": list(self.feature_names)}
+
+    def apply_pca(self, n_components=2):
+        return self.apply_extraction("pca", n_components)
+
+    def restore_from_pca(self):
+        return self.restore_extraction()
+
+    def get_feature_status(self):
+        return {
+            "total": len(self._all_input_names),
+            "selected": len(self._selected_input_names or []),
+            "selected_features": list(self._selected_input_names or []),
+            "extraction": self._extraction_method,
+            "extraction_components": self._extraction_components,
+            "feature_names": list(self.feature_names or []),
+            "pca": self._extraction_method == "pca",
+        }
 
     def get_fast_feature_importance(self, top_n=20):
         if self.X_train is None:

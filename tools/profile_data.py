@@ -1,8 +1,15 @@
 import pandas as pd
 import numpy as np
 import json
+import sys
 import time
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.core import DataYabCore
 
 
 def convert_to_serializable(obj):
@@ -37,18 +44,13 @@ def ultimate_profile(file_path):
     if file_size_mb > 100:
         print(f"⚠️ Large file ({file_size_mb:.1f} MB) - profiling may take time...")
 
-    # Load based on file extension
+    # Load with the same readers the application uses.
     try:
-        if ext == ".csv":
-            df = pd.read_csv(file_path, low_memory=False)
-        elif ext in [".xlsx", ".xls"]:
-            df = pd.read_excel(file_path)
-        elif ext == ".parquet":
-            df = pd.read_parquet(file_path)
-        elif ext == ".json":
-            df = pd.read_json(file_path)
-        else:
-            raise ValueError(f"Unsupported format: {ext}")
+        loader = DataYabCore()
+        result = loader.load_file(file_path)
+        if not result["success"]:
+            raise ValueError(result["message"])
+        df = loader.df
     except Exception as e:
         print(f"❌ Error loading file: {e}")
         raise
@@ -245,6 +247,8 @@ def print_quick_summary(profile):
 if __name__ == "__main__":
     import argparse
 
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Create a detailed JSON dataset profile."
     )

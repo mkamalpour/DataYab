@@ -504,6 +504,12 @@ class LoadTab(ttk.Frame):
         ttk.Button(
             left, text="🗄️ Load Parquet", command=self.load_parquet, width=25
         ).pack(fill=tk.X, pady=5)
+        ttk.Button(
+            left, text="🔢 Load Array (.arr)", command=self.load_arr, width=25
+        ).pack(fill=tk.X, pady=5)
+        ttk.Button(
+            left, text="🧪 Load ARFF", command=self.load_arff, width=25
+        ).pack(fill=tk.X, pady=5)
 
         ttk.Separator(left, orient="horizontal").pack(fill=tk.X, pady=15)
 
@@ -576,6 +582,16 @@ class LoadTab(ttk.Frame):
             self.app.run_threaded(
                 lambda: self.app.core.load_parquet(path), self.on_load
             )
+
+    def load_arr(self):
+        path = filedialog.askopenfilename(filetypes=[("Array files", "*.arr")])
+        if path:
+            self.app.run_threaded(lambda: self.app.core.load_arr(path), self.on_load)
+
+    def load_arff(self):
+        path = filedialog.askopenfilename(filetypes=[("ARFF files", "*.arff")])
+        if path:
+            self.app.run_threaded(lambda: self.app.core.load_arff(path), self.on_load)
 
     def on_load(self, result):
         if result["success"]:
@@ -1093,51 +1109,87 @@ class TrainTab(ttk.Frame):
         self.class_weight_combo.set("None")
         self.class_weight_combo.pack(anchor=tk.W, pady=2)
 
-        # ---------- FEATURE SELECTION SECTION (ADD THIS) ----------
+        # ---------- FEATURE SELECTION ----------
         self.fs_frame = ttk.LabelFrame(left, text="🎯 Feature Selection", padding=5)
         self.fs_frame.pack(fill=tk.X, pady=8)
 
-        # Row 1: RF Importance + Mutual Info
-        btn_frame1 = ttk.Frame(self.fs_frame)
-        btn_frame1.pack(fill=tk.X, pady=2)
+        select_row = ttk.Frame(self.fs_frame)
+        select_row.pack(fill=tk.X, pady=2)
+        ttk.Label(select_row, text="Method:", width=8).pack(side=tk.LEFT)
+        self.selection_method = ttk.Combobox(
+            select_row,
+            values=[
+                "Random Forest",
+                "Mutual information",
+                "ANOVA F-test",
+                "Correlation with target",
+                "Recursive elimination",
+                "Remove constant columns",
+            ],
+            state="readonly",
+            width=24,
+        )
+        self.selection_method.set("Random Forest")
+        self.selection_method.pack(side=tk.LEFT, padx=5)
+
+        keep_frame = ttk.Frame(self.fs_frame)
+        keep_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(keep_frame, text="Keep top:", width=8).pack(side=tk.LEFT)
+        self.selection_count = tk.Spinbox(keep_frame, from_=1, to=2000, width=8)
+        self.selection_count.delete(0, tk.END)
+        self.selection_count.insert(0, "10")
+        self.selection_count.pack(side=tk.LEFT, padx=5)
         ttk.Button(
-            btn_frame1,
-            text="🌲 RF Importance",
-            command=self.show_rf_importance,
-            width=16,
+            keep_frame, text="Apply Selection", command=self.apply_selection, width=14
         ).pack(side=tk.LEFT, padx=2)
         ttk.Button(
-            btn_frame1, text="📊 Mutual Info", command=self.show_mutual_info, width=16
+            keep_frame, text="Show Scores", command=self.show_selection_scores, width=11
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Button(
+            keep_frame, text="Restore All", command=self.restore_selection, width=11
         ).pack(side=tk.LEFT, padx=2)
 
-        # Row 2: Manual selection
+        # Manual selection
         manual_frame = ttk.Frame(self.fs_frame)
         manual_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(manual_frame, text="Manual:", width=7).pack(side=tk.LEFT)
+        ttk.Label(manual_frame, text="Manual:", width=8).pack(side=tk.LEFT)
         self.manual_features_entry = ttk.Entry(manual_frame, width=35)
         ttk.Button(
             manual_frame, text="Apply", command=self.apply_manual_selection, width=8
         ).pack(side=tk.RIGHT)
         self.manual_features_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Row 3: PCA
-        pca_frame = ttk.Frame(self.fs_frame)
-        pca_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(pca_frame, text="PCA:", width=10).pack(side=tk.LEFT)
-        self.pca_components = tk.Spinbox(pca_frame, from_=2, to=20, width=8)
-        self.pca_components.delete(0, tk.END)
-        self.pca_components.insert(0, "2")
-        self.pca_components.pack(side=tk.LEFT, padx=5)
-        ttk.Button(pca_frame, text="Apply PCA", command=self.apply_pca, width=10).pack(
-            side=tk.LEFT, padx=2
+        # ---------- FEATURE EXTRACTION ----------
+        self.ext_frame = ttk.LabelFrame(
+            left, text="🧩 Feature Extraction", padding=5
         )
+        self.ext_frame.pack(fill=tk.X, pady=8)
+
+        ext_row = ttk.Frame(self.ext_frame)
+        ext_row.pack(fill=tk.X, pady=2)
+        ttk.Label(ext_row, text="Method:", width=8).pack(side=tk.LEFT)
+        self.extraction_method = ttk.Combobox(
+            ext_row,
+            values=["PCA", "Truncated SVD", "LDA"],
+            state="readonly",
+            width=18,
+        )
+        self.extraction_method.set("PCA")
+        self.extraction_method.pack(side=tk.LEFT, padx=5)
+        self.extraction_components = tk.Spinbox(ext_row, from_=1, to=2000, width=8)
+        self.extraction_components.delete(0, tk.END)
+        self.extraction_components.insert(0, "2")
+        self.extraction_components.pack(side=tk.LEFT, padx=5)
         ttk.Button(
-            pca_frame, text="Restore", command=self.restore_from_pca, width=10
-        ).pack(side=tk.LEFT)
+            ext_row, text="Apply Extraction", command=self.apply_extraction, width=14
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Button(
+            ext_row, text="Restore", command=self.restore_extraction, width=8
+        ).pack(side=tk.LEFT, padx=2)
 
         # Feature status label
         self.feature_status_label = ttk.Label(
-            self.fs_frame, text="", font=("Segoe UI", 9, "italic")
+            left, text="", font=("Segoe UI", 9, "italic")
         )
         self.feature_status_label.pack(pady=2)
 
@@ -1316,6 +1368,7 @@ class TrainTab(ttk.Frame):
             )
             for f in self.app.core.feature_names[:15]:
                 self.feature_info.insert(tk.END, f"• {f}\n")
+        self.update_feature_status()
         self.app.tab_predict.build_form()
         self.app.tab_evaluate.update_metrics_display()
 
@@ -1357,141 +1410,190 @@ class TrainTab(ttk.Frame):
         self.app.run_threaded(compare, self.display_comparison)
 
     def update_feature_status(self):
-        """Update the feature status label"""
-        if self.app.core._selected_feature_names:
-            total = len(self.app.core.feature_names)
-            selected = len(self.app.core._selected_feature_names)
-            self.feature_status_label.config(
-                text=f"📌 Using {selected}/{total} features"
-            )
-        else:
+        """Update the selection/extraction status label."""
+        if self.app.core._raw_train is None:
             self.feature_status_label.config(text="")
+            return
+        status = self.app.core.get_feature_status()
+        text = f"📌 {status['selected']}/{status['total']} input columns"
+        if status["extraction"]:
+            text += (
+                f" · {status['extraction'].upper()} → "
+                f"{len(status['feature_names'])} features"
+            )
+        self.feature_status_label.config(text=text)
 
-    def show_rf_importance(self):
-        """Show Random Forest feature importance dialog"""
-        if self.app.core.X_train is None:
+    def _refresh_feature_info(self):
+        self.feature_info.delete(1.0, tk.END)
+        self.feature_info.insert(
+            tk.END, f"Features ({len(self.app.core.feature_names)}):\n"
+        )
+        for name in self.app.core.feature_names[:20]:
+            self.feature_info.insert(tk.END, f"• {name}\n")
+
+    def _selection_key(self):
+        return {
+            "Random Forest": "rf",
+            "Mutual information": "mutual_info",
+            "ANOVA F-test": "anova",
+            "Correlation with target": "correlation",
+            "Recursive elimination": "rfe",
+            "Remove constant columns": "variance",
+        }.get(self.selection_method.get(), "rf")
+
+    def apply_selection(self):
+        """Select original input columns with the chosen method."""
+        if self.app.core._raw_train is None:
             messagebox.showwarning("No Data", "Split data first (click Split & Train).")
             return
-
-        def get_importance():
-            return self.app.core.get_fast_feature_importance(top_n=20)
-
-        def display(importance_series):
-            win = tk.Toplevel(self)
-            win.title("Random Forest Feature Importance")
-            win.geometry("650x500")
-
-            # Main frame
-            main = ttk.Frame(win, padding=10)
-            main.pack(fill=tk.BOTH, expand=True)
-
-            # Text area
-            text = scrolledtext.ScrolledText(
-                main, font=("Consolas", 10), wrap=tk.WORD, height=20
-            )
-            text.pack(fill=tk.BOTH, expand=True)
-
-            text.insert(tk.END, "🌲 RANDOM FOREST FEATURE IMPORTANCE\n")
-            text.insert(tk.END, "=" * 50 + "\n\n")
-
-            for feat, imp in importance_series.items():
-                bar_len = int(imp * 50)
-                bar = "█" * bar_len + "░" * (50 - bar_len)
-                text.insert(tk.END, f"{feat:35s} {imp:.4f} {bar}\n")
-
-            # Button frame
-            btn_frame = ttk.Frame(main)
-            btn_frame.pack(fill=tk.X, pady=10)
-
-            def select_top():
-                k = simpledialog.askinteger(
-                    "Select Features",
-                    "Number of top features to keep:",
-                    initialvalue=10,
-                    minvalue=1,
-                    maxvalue=len(importance_series),
-                )
-                if k:
-                    top_features = list(importance_series.head(k).index)
-                    self.app.core.select_features_manual(top_features)
-                    self.update_feature_status()
-                    messagebox.showinfo(
-                        "Success",
-                        f"Selected {k} features:\n{', '.join(top_features[:5])}",
-                    )
-                    win.destroy()
-
-            ttk.Button(btn_frame, text="✓ Keep Top Features", command=select_top).pack(
-                side=tk.LEFT, padx=5
-            )
-            ttk.Button(btn_frame, text="Close", command=win.destroy).pack(
-                side=tk.LEFT, padx=5
-            )
-
-        self.app.run_threaded(get_importance, display)
-
-    def show_mutual_info(self):
-        """Show Mutual Information scores dialog"""
-        if self.app.core.X_train is None:
-            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+        method = self._selection_key()
+        try:
+            k = int(self.selection_count.get())
+        except ValueError:
+            messagebox.showerror("Invalid", "Enter a valid number of features.")
             return
 
-        def get_mi():
-            return self.app.core.get_mutual_information_top(k=20)
+        def do_select():
+            return self.app.core.apply_selection(method, k)
 
-        def display(mi_series):
-            win = tk.Toplevel(self)
-            win.title("Mutual Information Scores")
-            win.geometry("650x500")
-
-            main = ttk.Frame(win, padding=10)
-            main.pack(fill=tk.BOTH, expand=True)
-
-            text = scrolledtext.ScrolledText(
-                main, font=("Consolas", 10), wrap=tk.WORD, height=20
+        def display(result):
+            self.update_feature_status()
+            self._refresh_feature_info()
+            messagebox.showinfo(
+                "Selection Applied",
+                f"{method} kept {result['total']} column(s).\n"
+                f"Selected: {', '.join(result['selected'][:8])}"
+                f"{'…' if len(result['selected']) > 8 else ''}",
             )
-            text.pack(fill=tk.BOTH, expand=True)
 
-            text.insert(tk.END, "📊 MUTUAL INFORMATION SCORES\n")
-            text.insert(tk.END, "=" * 50 + "\n")
-            text.insert(tk.END, "(Higher = stronger relationship with target)\n\n")
+        self.app.run_threaded(do_select, display)
 
-            for feat, score in mi_series.items():
-                bar_len = (
-                    int(score / mi_series.max() * 50) if mi_series.max() > 0 else 0
+    def show_selection_scores(self):
+        """Show ranking scores for the selected filter method."""
+        if self.app.core._raw_train is None:
+            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+            return
+        method = self._selection_key()
+        if method in ("rfe", "variance"):
+            messagebox.showinfo(
+                "No Ranking",
+                "This method selects columns directly. Use Apply Selection.",
+            )
+            return
+        titles = {
+            "rf": "Random Forest feature importance",
+            "mutual_info": "Mutual information scores",
+            "anova": "ANOVA F-test scores",
+            "correlation": "Correlation with target",
+        }
+        self.app.run_threaded(
+            lambda: self.app.core.get_feature_scores(method, 20),
+            lambda series: self._show_score_dialog(series, titles[method], method),
+        )
+
+    def _show_score_dialog(self, series, title, method):
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.geometry("650x500")
+
+        main = ttk.Frame(win, padding=10)
+        main.pack(fill=tk.BOTH, expand=True)
+        text = scrolledtext.ScrolledText(
+            main, font=("Consolas", 10), wrap=tk.WORD, height=20
+        )
+        text.pack(fill=tk.BOTH, expand=True)
+        text.insert(tk.END, f"{title.upper()}\n")
+        text.insert(tk.END, "=" * 50 + "\n\n")
+        for name, score in series.items():
+            text.insert(tk.END, f"{name:35s} {score:.6f}\n")
+
+        btn_frame = ttk.Frame(main)
+        btn_frame.pack(fill=tk.X, pady=10)
+
+        def select_top():
+            k = simpledialog.askinteger(
+                "Select Features",
+                "Number of top features to keep:",
+                initialvalue=10,
+                minvalue=1,
+                maxvalue=len(series),
+            )
+            if not k:
+                return
+            try:
+                result = self.app.core.apply_selection(method, k)
+            except Exception as error:
+                messagebox.showerror("Error", str(error))
+                return
+            self.update_feature_status()
+            self._refresh_feature_info()
+            messagebox.showinfo(
+                "Success",
+                f"Selected {result['total']} features:\n"
+                f"{', '.join(result['selected'][:5])}",
+            )
+            win.destroy()
+
+        ttk.Button(btn_frame, text="✓ Keep Top Features", command=select_top).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(btn_frame, text="Close", command=win.destroy).pack(
+            side=tk.LEFT, padx=5
+        )
+
+    def restore_selection(self):
+        """Restore every original input column."""
+        if self.app.core._raw_train is None:
+            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+            return
+        result = self.app.core.restore_selection()
+        self.update_feature_status()
+        self._refresh_feature_info()
+        messagebox.showinfo(
+            "Restored", f"Using {result['selected']} input column(s)."
+        )
+
+    def apply_extraction(self):
+        """Apply PCA, SVD or LDA component extraction."""
+        if self.app.core._raw_train is None:
+            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+            return
+        method = {
+            "PCA": "pca",
+            "Truncated SVD": "svd",
+            "LDA": "lda",
+        }.get(self.extraction_method.get(), "pca")
+        try:
+            components = int(self.extraction_components.get())
+        except ValueError:
+            messagebox.showerror("Invalid", "Enter a valid number of components.")
+            return
+
+        def do_extract():
+            return self.app.core.apply_extraction(method, components)
+
+        def display(result):
+            message = f"{method.upper()} applied: {result['n_components']} components"
+            if "total_variance" in result:
+                message += (
+                    f"\nExplained variance: {result['total_variance']:.2%}"
                 )
-                bar = "█" * bar_len + "░" * (50 - bar_len)
-                text.insert(tk.END, f"{feat:35s} {score:.6f} {bar}\n")
+            message += f"\nFeatures: {', '.join(result['features'])}"
+            self.update_feature_status()
+            self._refresh_feature_info()
+            messagebox.showinfo("Extraction Complete", message)
 
-            btn_frame = ttk.Frame(main)
-            btn_frame.pack(fill=tk.X, pady=10)
+        self.app.run_threaded(do_extract, display)
 
-            def select_top():
-                k = simpledialog.askinteger(
-                    "Select Features",
-                    "Number of top features to keep:",
-                    initialvalue=10,
-                    minvalue=1,
-                    maxvalue=len(mi_series),
-                )
-                if k:
-                    top_features = list(mi_series.head(k).index)
-                    self.app.core.select_features_manual(top_features)
-                    self.update_feature_status()
-                    messagebox.showinfo(
-                        "Success",
-                        f"Selected {k} features:\n{', '.join(top_features[:5])}",
-                    )
-                    win.destroy()
-
-            ttk.Button(btn_frame, text="✓ Keep Top Features", command=select_top).pack(
-                side=tk.LEFT, padx=5
-            )
-            ttk.Button(btn_frame, text="Close", command=win.destroy).pack(
-                side=tk.LEFT, padx=5
-            )
-
-        self.app.run_threaded(get_mi, display)
+    def restore_extraction(self):
+        """Remove extraction and return to the original selected columns."""
+        if self.app.core._raw_train is None:
+            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+            return
+        self.app.core.restore_extraction()
+        self.update_feature_status()
+        self._refresh_feature_info()
+        messagebox.showinfo("Restored", "Extraction removed.")
 
     def apply_manual_selection(self):
         """Apply manual feature selection from entry field"""
@@ -1501,82 +1603,23 @@ class TrainTab(ttk.Frame):
             return
 
         features = [f.strip() for f in text.split(",") if f.strip()]
-
-        # Validate features exist
-        missing = [f for f in features if f not in self.app.core.feature_names]
+        missing = [
+            f for f in features if f not in self.app.core._all_input_names
+        ]
         if missing:
-            messagebox.showerror("Not Found", f"Features not found: {missing}")
-            return
-
-        self.app.core.select_features_manual(features)
-        self.update_feature_status()
-        messagebox.showinfo("Success", f"Selected {len(features)} features")
-
-        # Update feature info display
-        self.feature_info.delete(1.0, tk.END)
-        self.feature_info.insert(tk.END, f"Selected Features ({len(features)}):\n")
-        for f in features[:15]:
-            self.feature_info.insert(tk.END, f"• {f}\n")
-
-    def apply_pca(self):
-        """Apply PCA dimensionality reduction"""
-        if self.app.core.X_train is None:
-            messagebox.showwarning("No Data", "Split data first (click Split & Train).")
+            messagebox.showerror("Not Found", f"Columns not found: {missing}")
             return
 
         try:
-            n_components = int(self.pca_components.get())
-        except ValueError:
-            messagebox.showerror("Invalid", "Enter a valid number of components")
+            result = self.app.core.apply_selection("manual", features=features)
+        except Exception as error:
+            messagebox.showerror("Error", str(error))
             return
-
-        if n_components > len(self.app.core.feature_names):
-            messagebox.showerror(
-                "Too Many",
-                f"Can't have more than {len(self.app.core.feature_names)} components",
-            )
-            return
-
-        def do_pca():
-            return self.app.core.apply_pca(n_components)
-
-        def display(result):
-            explained = result["explained_variance_ratio"]
-
-            msg = f"PCA Applied: {n_components} components\n"
-            msg += "Explained variance per component:\n"
-            for i, var in enumerate(explained):
-                msg += f"  PC{i + 1}: {var:.2%}\n"
-            msg += f"\nTotal explained variance: {sum(explained):.2%}"
-
-            messagebox.showinfo("PCA Complete", msg)
-            self.update_feature_status()
-
-            # Update feature info display
-            self.feature_info.delete(1.0, tk.END)
-            self.feature_info.insert(
-                tk.END, f"PCA Features ({n_components} components):\n"
-            )
-            for i in range(n_components):
-                self.feature_info.insert(tk.END, f"• PC{i + 1}\n")
-
-        self.app.run_threaded(do_pca, display)
-
-    def restore_from_pca(self):
-        """Restore original features after PCA"""
-        result = self.app.core.restore_from_pca()
-        if result:
-            self.update_feature_status()
-            # Update feature info display
-            self.feature_info.delete(1.0, tk.END)
-            self.feature_info.insert(
-                tk.END, f"Features ({len(self.app.core.feature_names)}):\n"
-            )
-            for f in self.app.core.feature_names[:15]:
-                self.feature_info.insert(tk.END, f"• {f}\n")
-            messagebox.showinfo("Restored", "Original features restored")
-        else:
-            messagebox.showinfo("Info", "No PCA applied or already restored")
+        self.update_feature_status()
+        self._refresh_feature_info()
+        messagebox.showinfo(
+            "Success", f"Selected {result['total']} columns:\n{', '.join(features[:8])}"
+        )
 
     def display_comparison(self, df):
         self.results_text.delete(1.0, tk.END)

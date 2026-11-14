@@ -22,6 +22,20 @@ MAX_UPLOAD = 50 * 1024 * 1024
 core = DataYabCore()
 state_lock = threading.RLock()
 app = FastAPI(title="DataYab", version="2.0.0")
+SELECTION_METHODS = [
+    {"id": "rf", "name": "Random Forest importance"},
+    {"id": "mutual_info", "name": "Mutual information"},
+    {"id": "anova", "name": "ANOVA F-test"},
+    {"id": "correlation", "name": "Correlation with target"},
+    {"id": "rfe", "name": "Recursive feature elimination"},
+    {"id": "variance", "name": "Remove constant columns"},
+    {"id": "manual", "name": "Manual column list"},
+]
+EXTRACTION_METHODS = [
+    {"id": "pca", "name": "Principal Component Analysis (PCA)"},
+    {"id": "svd", "name": "Truncated SVD"},
+    {"id": "lda", "name": "Linear Discriminant Analysis (classification only)"},
+]
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"],
@@ -151,9 +165,11 @@ def status():
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in (".csv", ".xlsx", ".xls", ".json", ".parquet"):
+    if suffix not in (".csv", ".xlsx", ".xls", ".json", ".parquet", ".arr", ".arff"):
         await file.close()
-        raise HTTPException(400, "Supported files: CSV, Excel, JSON, Parquet.")
+        raise HTTPException(
+            400, "Supported files: CSV, Excel, JSON, Parquet, ARR, ARFF."
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="datayab-upload-") as directory:
             path = Path(directory) / ("dataset" + suffix)
@@ -350,6 +366,75 @@ def confusion():
     return {"success": True, **core.get_confusion_matrix()}
 
 
+@app.get("/api/selection/methods")
+@workspace
+def selection_methods():
+    return {"success": True, "methods": SELECTION_METHODS}
+
+
+@app.get("/api/selection/status")
+@workspace
+def selection_status():
+    return {"success": True, **core.get_feature_status()}
+
+
+@app.get("/api/selection/rank")
+@workspace
+def selection_rank(
+    method: str = Query("rf"), k: int = Query(20, ge=1, le=2000)
+):
+    scores = core.get_feature_scores(method, k)
+    return {
+        "success": True,
+        "method": method,
+        "scores": {str(name): float(value) for name, value in scores.items()},
+    }
+
+
+@app.post("/api/selection/apply")
+@workspace
+def selection_apply(request: dict = Body(...)):
+    try:
+        k = int(request.get("k", 10))
+    except (TypeError, ValueError):
+        raise ValueError("Keep count must be a whole number.") from None
+    return core.apply_selection(
+        method=request.get("method", "rf"),
+        k=k,
+        features=request.get("features"),
+    )
+
+
+@app.post("/api/selection/restore")
+@workspace
+def selection_restore():
+    return core.restore_selection()
+
+
+@app.get("/api/extraction/methods")
+@workspace
+def extraction_methods():
+    return {"success": True, "methods": EXTRACTION_METHODS}
+
+
+@app.post("/api/extraction/apply")
+@workspace
+def extraction_apply(request: dict = Body(...)):
+    try:
+        components = int(request.get("components", 2))
+    except (TypeError, ValueError):
+        raise ValueError("Components must be a whole number.") from None
+    return core.apply_extraction(
+        method=request.get("method", "pca"), n_components=components
+    )
+
+
+@app.post("/api/extraction/restore")
+@workspace
+def extraction_restore():
+    return core.restore_extraction()
+
+
 @app.get("/api/feature-importance")
 @workspace
 def feature_importance():
@@ -386,31 +471,30 @@ def feature_select(request: dict = Body(...)):
 @workspace
 def pca(components: int = Query(2, ge=1)):
     result = core.apply_pca(components)
-    return {"success": True, "total_variance": sum(result["explained_variance_ratio"])}
+    return {
+        "success": True,
+        "n_components": result["n_components"],
+        "total_variance": result.get("total_variance", 0.0),
+    }
 
 
 @app.post("/api/feature/restore")
 @workspace
 def restore():
-    return {"success": core.restore_from_pca()}
+    return core.restore_extraction()
 
 
 @app.post("/api/feature/keep_top")
 @workspace
 def keep_top(k: int = Query(10, ge=1, le=2000)):
-    features = list(core.get_fast_feature_importance(k).index)
-    core.select_features_manual(features)
-    return {"success": True, "features": features}
+    result = core.apply_selection("rf", k)
+    return {"success": True, "features": result["selected"]}
 
 
 @app.get("/api/feature/status")
 @workspace
 def feature_status():
-    return {
-        "success": True,
-        "total": len(core._all_input_names),
-        "selected": len(core.feature_names),
-    }
+    return {"success": True, **core.get_feature_status()}
 
 
 @app.get("/api/cross-validation")
@@ -486,6 +570,30 @@ def insights():
 @workspace
 def health():
     return {"success": True, **core.get_dataset_health_score()}
+
+
+@app.get("/api/dataset/quality")
+@workspace
+def dataset_quality():
+    return {"success": True, **core.get_dataset_quality()}
+
+
+@app.post("/api/export/cleaned")
+@workspace
+def export_cleaned(format: str = Query("csv")):
+    if format not in ("csv", "arff"):
+        raise ValueError("Format must be csv or arff.")
+    suffix = ".arff" if format == "arff" else ".csv"
+    with tempfile.TemporaryDirectory(prefix="datayab-export-") as directory:
+        path = Path(directory) / f"cleaned{suffix}"
+        core.export_cleaned_data(path)
+        return Response(
+            path.read_bytes(),
+            media_type="text/arff" if format == "arff" else "text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="DataYab_cleaned{suffix}"'
+            },
+        )
 
 
 @app.get("/api/export/report")

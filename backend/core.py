@@ -4,6 +4,7 @@ from .storage import atomic_target
 
 import io
 import base64
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,38 @@ def _fig_to_base64(fig) -> str:
     encoded = base64.b64encode(buf.read()).decode("utf-8")
     plt.close(fig)
     return encoded
+
+
+def _arff_escape(text) -> str:
+    value = str(text).replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{value}'"
+
+
+def _arff_token(value) -> str:
+    text = str(value)
+    unsafe = not text or any(ch in text for ch in " ,{}%'\"\\\t\n")
+    return _arff_escape(text) if unsafe else text
+
+
+def _arff_cell(value) -> str:
+    if pd.isna(value):
+        return "?"
+    if isinstance(value, (bool, np.bool_)):
+        return "True" if value else "False"
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        return repr(float(value)) if np.isfinite(value) else "?"
+    return _arff_token(value)
+
+
+def _arff_nominal(values) -> str:
+    tokens = []
+    for value in values.dropna().unique():
+        token = _arff_token(value)
+        if token not in tokens:
+            tokens.append(token)
+    return "{" + ",".join(tokens) + "}" if tokens else "{'Unknown'}"
 
 
 # ------------------------------
@@ -75,6 +108,49 @@ class DataYabCore(ModelingMixin):
                 df.select_dtypes(include=["object", "category"]).columns
             ),
             "datetime_cols": list(df.select_dtypes(include=["datetime64"]).columns),
+        }
+
+    def get_dataset_quality(self) -> dict:
+        """Summarise duplicates, missingness, class balance and redundant pairs."""
+        self._require_data()
+        df = self.df
+        info = self.get_info()
+        duplicates = int(df.duplicated().sum())
+        constant = [c for c in df.columns if df[c].nunique(dropna=True) <= 1]
+        correlation_pairs = []
+        numeric = df.select_dtypes(include=np.number)
+        if numeric.shape[1] >= 2:
+            corr = numeric.corr().abs()
+            upper = corr.where(np.triu(np.ones(corr.shape, dtype=bool), 1))
+            for (left, right), value in upper.stack().sort_values(ascending=False).head(10).items():
+                correlation_pairs.append(
+                    {
+                        "feature_a": str(left),
+                        "feature_b": str(right),
+                        "correlation": round(float(value), 4),
+                    }
+                )
+        class_balance = {}
+        if self.target_col and self.target_col in df.columns:
+            counts = df[self.target_col].value_counts(dropna=True)
+            class_balance = {str(k): int(v) for k, v in counts.head(25).items()}
+        missing_columns = [
+            {"column": str(c), "missing": int(v), "percent": round(v / len(df) * 100, 2)}
+            for c, v in df.isnull().sum().items()
+            if v > 0
+        ]
+        return {
+            "rows": int(df.shape[0]),
+            "columns": int(df.shape[1]),
+            "duplicate_rows": duplicates,
+            "duplicate_percent": round(duplicates / len(df) * 100, 2) if len(df) else 0.0,
+            "constant_columns": [str(c) for c in constant],
+            "missing_total": int(info["total_missing"]),
+            "missing_columns": missing_columns,
+            "target": self.target_col or None,
+            "class_balance": class_balance,
+            "top_correlations": correlation_pairs,
+            "dtypes": info["dtypes"],
         }
 
     # ------------------------------------------------------------------
@@ -336,19 +412,24 @@ class DataYabCore(ModelingMixin):
             raise ValueError("Target column not found.")
         if target_col:
             self.target_col = target_col
-        before = len(self.df)
-        self.df = self.df.drop_duplicates().reset_index(drop=True)
+        duplicates = int(self.df.duplicated().sum())
         converted = self.fix_dtypes()["converted"]
         steps = [
-            f"Removed {before - len(self.df)} duplicate rows",
+            f"Detected {duplicates:,} duplicate rows; kept them. Use Remove Duplicates explicitly if they are unwanted.",
             f"Converted numeric text columns: {converted}",
             "Missing values and outliers retained: training imputes features inside each fold; targets are never imputed.",
             "High-cardinality and constant columns retained for explicit review.",
         ]
         self._log(
-            "Conservative auto-clean complete; no target imputation or automatic outlier clipping."
+            "Conservative auto-clean complete; duplicates kept, no target imputation or automatic outlier clipping."
         )
-        return {"success": True, "steps": steps, "shape": self.df.shape}
+        return {
+            "success": True,
+            "steps": steps,
+            "shape": self.df.shape,
+            "duplicates_detected": duplicates,
+            "duplicates_removed": 0,
+        }
 
     # ------------------------------------------------------------------
     # 3. EDA
@@ -970,6 +1051,29 @@ class DataYabCore(ModelingMixin):
             self.df.to_csv(temporary, index=False)
         self._log(f"Cleaned dataset exported to {file_path}")
         return {"success": True, "path": file_path}
+
+    def export_cleaned_arff(self, file_path: str, relation: str = "datayab_dataset") -> dict:
+        """Write the working dataset as a Weka ARFF file."""
+        self._require_data()
+        with atomic_target(file_path) as temporary:
+            lines = [f"@relation {_arff_token(relation)}", ""]
+            for column in self.df.columns:
+                numeric = pd.api.types.is_numeric_dtype(
+                    self.df[column]
+                ) and not pd.api.types.is_bool_dtype(self.df[column])
+                kind = "numeric" if numeric else _arff_nominal(self.df[column])
+                lines.append(f"@attribute {_arff_token(column)} {kind}")
+            lines.extend(["", "@data"])
+            for row in self.df.itertuples(index=False, name=None):
+                lines.append(",".join(_arff_cell(value) for value in row))
+            temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self._log(f"Cleaned ARFF exported to {file_path}")
+        return {"success": True, "path": file_path}
+
+    def export_cleaned_data(self, file_path: str) -> dict:
+        if Path(file_path).suffix.lower() == ".arff":
+            return self.export_cleaned_arff(file_path)
+        return self.export_cleaned_csv(file_path)
 
     # ------------------------------------------------------------------
     # PRIVATE HELPERS

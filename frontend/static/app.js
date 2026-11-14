@@ -178,7 +178,10 @@ document.querySelectorAll(".nav-link").forEach((link) =>
         el.classList.toggle("active", el.id === link.dataset.section),
       );
     const loaders = {
-      explore: loadPreview,
+      explore: async () => {
+        await loadPreview();
+        await loadQuality();
+      },
       predict: loadPredictForm,
       evaluate: loadModels,
       feature: loadFeatureStatus,
@@ -241,6 +244,7 @@ async function uploadFile(file) {
       $("modelStatus").textContent = "No trained model";
       await loadColumns();
       await loadModels();
+      await loadQuality();
     },
     "uploadResult",
   );
@@ -262,6 +266,85 @@ async function loadColumns() {
     notice(e.message, "warning");
   }
 }
+async function loadQuality() {
+  try {
+    const r = await request("/dataset/quality");
+    const items = [
+      `${r.rows.toLocaleString()} rows × ${r.columns} columns`,
+      `Duplicate rows: ${r.duplicate_rows.toLocaleString()} (${r.duplicate_percent}%)`,
+      `Missing values: ${r.missing_total.toLocaleString()}`,
+      `Constant columns: ${
+        r.constant_columns.length
+          ? r.constant_columns.join(", ")
+          : "none"
+      }`,
+    ];
+    if (r.target) items.push(`Target: ${r.target}`);
+    const classes = Object.entries(r.class_balance || {});
+    if (classes.length)
+      items.push(
+        `Class balance: ${classes
+          .slice(0, 10)
+          .map(([name, count]) => `${name}: ${count.toLocaleString()}`)
+          .join(", ")}`,
+      );
+    if (r.missing_columns?.length)
+      items.push(
+        `Columns with missing data: ${r.missing_columns
+          .slice(0, 5)
+          .map((col) => `${col.column} (${col.percent}%)`)
+          .join(", ")}`,
+      );
+    if (r.top_correlations?.length) {
+      const top = r.top_correlations[0];
+      items.push(
+        `Strongest correlation: ${top.feature_a} ↔ ${top.feature_b} (r=${top.correlation})`,
+      );
+    }
+    if (r.duplicate_rows)
+      items.push(
+        "Duplicates are kept. Remove them explicitly only if they are not valid repeated observations.",
+      );
+    listResult(
+      "qualityResult",
+      "Dataset quality",
+      items,
+      r.duplicate_rows || r.missing_total ? "warning" : "success",
+    );
+  } catch (e) {
+    message("qualityResult", e.message, "warning");
+  }
+}
+async function exportCleaned(format) {
+  try {
+    const response = await fetch(
+      `${API_BASE}/export/cleaned?format=${format}`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      let detail = `Export failed (${response.status})`;
+      try {
+        const data = await response.json();
+        detail = data.detail || detail;
+      } catch {
+        /* keep the status message */
+      }
+      throw new Error(
+        typeof detail === "string" ? detail : JSON.stringify(detail),
+      );
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `DataYab_cleaned.${format}`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notice(`Cleaned dataset exported as ${format.toUpperCase()}.`, "success");
+  } catch (e) {
+    notice(e.message, "danger");
+  }
+}
 async function cleanData(operation) {
   await action(
     "Preparing dataset",
@@ -279,92 +362,162 @@ async function cleanData(operation) {
       listResult("cleanResult", "Data preparation complete", items, "success");
       await loadColumns();
       await loadModels();
+      await loadQuality();
       updateStatus("Dataset updated; retrain models");
     },
     "cleanResult",
   );
 }
-async function importance(path, title) {
+const SELECTION_LABELS = {
+  rf: "Random Forest importance",
+  mutual_info: "Mutual information",
+  anova: "ANOVA F-test",
+  correlation: "Correlation with target",
+  rfe: "Recursive feature elimination",
+  variance: "Constant-column filter",
+};
+async function rankFeatures() {
+  const method = $("selectionMethod").value;
+  const k = Math.max(1, Number($("selectionCount").value) || 15);
   await action(
-    "Calculating feature scores",
+    "Ranking features",
     async () => {
-      const r = await request(path);
-      const entries = Object.entries(r.importance || {}).slice(0, 15);
+      const r = await request("/selection/rank?" + query({ method, k }));
+      const entries = Object.entries(r.scores || {});
       listResult(
-        "featureImportanceResult",
-        title,
+        "selectionResult",
+        SELECTION_LABELS[method] || "Feature scores",
         entries.map(([name, value]) => `${name}: ${number(value, 6)}`),
       );
-      const b = node("button", "Keep top features", "btn btn-primary");
-      b.onclick = keepTopFeatures;
-      $("featureImportanceResult").append(b);
     },
-    "featureImportanceResult",
+    "selectionResult",
   );
 }
-function getRFImportance() {
-  return importance(
-    "/feature-importance-rf",
-    "Random Forest feature importance",
+async function applyFeatureSelection() {
+  const method = $("selectionMethod").value;
+  const k = Math.max(1, Number($("selectionCount").value) || 1);
+  await action(
+    "Applying feature selection",
+    async () => {
+      const r = await post("/selection/apply", { method, k });
+      const total = r.selected.length + r.dropped.length;
+      const items = [
+        `Kept ${r.selected.length} of ${total} input columns (${SELECTION_LABELS[method] || method}).`,
+        `Selected: ${r.selected.slice(0, 20).join(", ")}${
+          r.selected.length > 20 ? "…" : ""
+        }`,
+      ];
+      if (r.dropped.length)
+        items.push(`Dropped ${r.dropped.length} column(s).`);
+      listResult("selectionResult", "Feature selection applied", items, "success");
+      await loadFeatureStatus();
+    },
+    "selectionResult",
   );
-}
-function getMutualInfo() {
-  return importance("/mutual-info", "Mutual information scores");
 }
 async function applyManualSelection() {
   const features = $("manualFeatures")
     .value.split(",")
-    .map((v) => v.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
   if (!features.length) {
     notice("Enter feature names separated by commas.", "warning");
     return;
   }
-  await action("Selecting features", async () => {
-    const r = await post("/feature/select", { features });
-    notice(`Selected ${r.count} features.`, "success");
-    await loadFeatureStatus();
-  });
+  await action(
+    "Selecting features",
+    async () => {
+      const r = await post("/selection/apply", { method: "manual", features });
+      listResult(
+        "selectionResult",
+        "Manual selection applied",
+        [
+          `Using ${r.selected.length} column(s).`,
+          `Selected: ${r.selected.join(", ")}`,
+        ],
+        "success",
+      );
+      await loadFeatureStatus();
+    },
+    "selectionResult",
+  );
 }
-async function applyPCA() {
-  await action("Configuring PCA", async () => {
-    const r = await post(
-      "/feature/pca?" + query({ components: $("pcaComponents").value }),
-    );
-    notice(
-      `PCA configured. Explained variance: ${number(r.total_variance * 100, 2)}%.`,
-      "success",
-    );
-    await loadFeatureStatus();
-  });
+async function restoreFeatureSelection() {
+  await action(
+    "Restoring input columns",
+    async () => {
+      const r = await post("/selection/restore");
+      listResult(
+        "selectionResult",
+        "All input columns restored",
+        [`Using ${r.selected} column(s).`],
+        "success",
+      );
+      await loadFeatureStatus();
+    },
+    "selectionResult",
+  );
 }
-async function restoreFromPCA() {
-  await action("Restoring features", async () => {
-    await post("/feature/restore");
-    notice("Original feature configuration restored.", "success");
-    await loadFeatureStatus();
-  });
+async function applyFeatureExtraction() {
+  const method = $("extractionMethod").value;
+  const components = Math.max(
+    1,
+    Number($("extractionComponents").value) || 1,
+  );
+  await action(
+    "Applying feature extraction",
+    async () => {
+      const r = await post("/extraction/apply", { method, components });
+      const items = [
+        `${method.toUpperCase()} created ${r.n_components} component(s).`,
+        `Components: ${r.features.join(", ")}`,
+      ];
+      if (typeof r.total_variance === "number")
+        items.push(
+          `Explained variance: ${number(r.total_variance * 100, 2)}%`,
+        );
+      if (Array.isArray(r.cumulative_variance))
+        items.push(
+          `Cumulative variance: ${r.cumulative_variance
+            .slice(0, 8)
+            .map((value) => `${number(value * 100, 1)}%`)
+            .join(", ")}`,
+        );
+      listResult(
+        "extractionResult",
+        "Feature extraction applied",
+        items,
+        "success",
+      );
+      await loadFeatureStatus();
+    },
+    "extractionResult",
+  );
 }
-async function keepTopFeatures() {
-  const k = prompt("Number of top features to keep:", "10");
-  if (k === null) return;
-  if (!/^\d+$/.test(k) || Number(k) < 1) {
-    notice("Enter a positive whole number.", "warning");
-    return;
-  }
-  await action("Selecting top features", async () => {
-    await post("/feature/keep_top?" + query({ k }));
-    notice(`Selected top ${k} features.`, "success");
-    await loadFeatureStatus();
-  });
+async function restoreFeatureExtraction() {
+  await action(
+    "Removing feature extraction",
+    async () => {
+      const r = await post("/extraction/restore");
+      listResult(
+        "extractionResult",
+        "Original features restored",
+        [`Using ${r.features.length} feature(s).`],
+        "success",
+      );
+      await loadFeatureStatus();
+    },
+    "extractionResult",
+  );
 }
 async function loadFeatureStatus() {
   try {
-    const r = await request("/feature/status");
-    message(
-      "featureStatus",
-      `Using ${r.selected} of ${r.total} features${r.pca ? " / PCA configured" : ""}`,
-    );
+    const r = await request("/selection/status");
+    const base = `Using ${r.selected} of ${r.total} input columns`;
+    const extraction = r.extraction
+      ? ` / ${r.extraction.toUpperCase()} extraction active (${r.feature_names.length} components)`
+      : "";
+    message("featureStatus", base + extraction);
   } catch (e) {
     message("featureStatus", e.message, "warning");
   }

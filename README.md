@@ -42,15 +42,19 @@ Open http://127.0.0.1:8001. Run `python app.py --tkinter` for desktop mode (also
 ```powershell
 python app.py --cli --file "path/to/dataset.csv"
 python app.py --cli --file "path/to/dataset.csv" --target outcome --task classification
+python app.py --cli --file "path/to/dataset.arff" --target Result --task classification
 python tools/profile_data.py "path/to/dataset.csv" --output "path/to/profile.json"
+
+# Write a deduplicated copy plus a Markdown quality report (source is untouched).
+python tools/clean_dataset.py "path/to/Training Dataset.arff" --target Result --csv
 ```
 
 ## Workflow
 
-1. Load CSV, Excel, JSON records, or Parquet. Web uploads are temporary and limited to 50 MB. Tables support up to 1,000,000 rows and 2,000 columns; flatten nested arrays/objects first.
-2. Inspect missing values, duplicates, distributions, correlations, and observations. Automatic cleaning removes duplicates and converts numeric text; other cleaning operations are explicit.
+1. Load CSV, Excel, JSON records, Parquet, `.arr` array files (NumPy arrays, Arrow/Feather tables, or delimited text), or Weka `.arff` datasets. Web uploads are temporary and limited to 50 MB. Tables support up to 1,000,000 rows and 2,000 columns; flatten nested arrays/objects first.
+2. Inspect the dataset quality report (duplicates, missing values, constant columns, class balance, strongest correlations). Automatic cleaning reports duplicates and converts numeric text but keeps every row; removing duplicates or outliers is an explicit action. The cleaned working table can be exported as CSV or ARFF.
 3. Choose a target and train/test split. The web UI and CLI support an explicit classification/regression override; automatic detection uses a low-cardinality integer heuristic.
-4. Train or compare models, explore feature rankings, select original columns, or apply PCA. Data and feature changes clear outdated models.
+4. **Feature selection** (choose which original columns feed the model) and **feature extraction** (build components from them) are separate stages. Selection offers Random Forest importance, mutual information, ANOVA F-test, correlation with the target, recursive feature elimination, a constant-column filter, and a manual column list. Extraction offers PCA, Truncated SVD, and LDA (classification only). Selection resets extraction; extraction leaves the selected columns intact. Data and feature changes clear outdated models.
 5. Evaluate holdout metrics and charts, then predict from raw inputs. Desktop mode also supports batch CSV prediction and model import/export.
 
 ## Modeling details
@@ -73,6 +77,7 @@ Existing datasets and reports remain local, excluded from Git alongside model pa
 - `backend/`: exploration, cleaning, and model pipelines
 - `frontend/`: desktop UI, web API, templates, and local assets
 - `tools/profile_data.py`: detailed JSON dataset profiler
+- `tools/clean_dataset.py`: deduplicated ARFF/CSV copy plus Markdown quality report
 - `tests/`: synthetic-data regression tests
 
 ## Validation
@@ -84,9 +89,9 @@ python -m pytest tests -q
 python -m pip check
 ```
 
-Regression tests cover training-only preprocessing, model/PCA persistence, regression, stacking, state invalidation, uploads, request guards, and report escaping. Browser checks cover upload-to-prediction workflows and responsive layouts.
+Regression tests cover training-only preprocessing, model export/import, regression, stacking, state invalidation, uploads, request guards, report escaping, ARFF/ARR loading, selection and extraction methods, dataset quality reporting, and ARFF/CSV export. Browser checks cover upload-to-prediction workflows and responsive layouts.
 
-Checked on Windows with Python 3.13.5 (Conda base): **30 tests passed**.
+Checked on Windows with Python 3.13.5 (Conda base): **55 tests passed**.
 
 Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.
 
