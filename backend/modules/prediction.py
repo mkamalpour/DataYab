@@ -118,13 +118,22 @@ class Predictor:
             test_indices = list(range(len(self.fe.y_test)))
 
         rows = []
+        reserved = {"index", "original_index", "actual", "predicted", "confidence", "correct"}
+        output_names = {}
+        used = set(reserved)
+        for name in self.fe.data_loader.df.columns:
+            output_name = name
+            while output_name in used:
+                output_name = "input." + output_name
+            output_names[name] = output_name
+            used.add(output_name)
         for i in test_indices:
-            if i >= len(self.fe.y_test):
-                continue
+            if not isinstance(i, (int, np.integer)) or isinstance(i, bool) or not 0 <= i < len(self.fe.y_test):
+                raise ValueError("Test indices must be valid non-negative row positions.")
 
             # Get original row data
             orig_idx = self.fe._test_indices[i]
-            row_data = self.fe.data_loader.df.loc[orig_idx].to_dict()
+            row_data = {output_names[name]: value for name, value in self.fe.data_loader.df.loc[orig_idx].items()}
 
             # Get actual and predicted
             if self.fe.problem_type == "classification":

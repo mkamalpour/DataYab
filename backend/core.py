@@ -3,6 +3,8 @@
 from typing import Optional, Dict, Any, List
 import numpy as np
 import pandas as pd
+import time
+from .logging_utils import get_logger
 
 from .modules import (
     DataLoader, DataCleaner, FeatureEngineer,
@@ -487,8 +489,15 @@ class DataYabCore:
         scaler_type: str = "standard",
         problem_type: str = "auto"
     ) -> Dict:
+        self._require_data()
         previous = self.feature_engineer._raw_train
-        result = self.feature_engineer.split_data(target, test_size, scale, scaler_type, problem_type)
+        previous_state = self.feature_engineer.__dict__.copy()
+        try:
+            result = self.feature_engineer.split_data(target, test_size, scale, scaler_type, problem_type)
+        except Exception:
+            self.feature_engineer.__dict__.clear()
+            self.feature_engineer.__dict__.update(previous_state)
+            raise
         if self.feature_engineer._raw_train is not previous:
             self.model_trainer._reset_learning()
         # Sync target_col and problem_type
@@ -736,6 +745,7 @@ class DataYabCore:
         self.feature_engineer.__init__(self.data_loader)
 
     def _dataset_replaced(self):
+        self._data_revision = getattr(self, "_data_revision", 0) + 1
         self._reset_learning()
         self.target_col = ""
         self.label_encoders = {}
@@ -784,6 +794,7 @@ def _dataset_edit(method):
         target = self.target_col
         self._reset_learning()
         self.target_col = target if target in (self.data_loader.df.columns if self.data_loader.df is not None else []) else ""
+        self._data_revision = getattr(self, "_data_revision", 0) + 1
         self.insights = []
         return result
     return guarded
@@ -823,3 +834,26 @@ def _feature_edit(method):
 for _name in ("apply_selection", "select_features_manual", "restore_selection",
               "apply_extraction", "restore_extraction", "apply_pca", "restore_from_pca"):
     setattr(DataYabCore, _name, _feature_edit(getattr(DataYabCore, _name)))
+
+
+def _logged_operation(method):
+    @wraps(method)
+    def logged(self, *args, **kwargs):
+        logger = get_logger()
+        started = time.monotonic()
+        try:
+            result = method(self, *args, **kwargs)
+        except Exception:
+            logger.exception("Operation %s failed after %.3fs", method.__name__, time.monotonic() - started)
+            raise
+        if isinstance(result, dict) and result.get("success") is False:
+            logger.warning("Operation %s rejected: %s", method.__name__, result.get("message", "Unknown reason"))
+        elif not method.__name__.startswith(("get_", "plot_")):
+            logger.info("Operation %s completed in %.3fs", method.__name__, time.monotonic() - started)
+        return result
+    return logged
+
+
+for _name, _method in list(vars(DataYabCore).items()):
+    if not _name.startswith("_") and callable(_method):
+        setattr(DataYabCore, _name, _logged_operation(_method))

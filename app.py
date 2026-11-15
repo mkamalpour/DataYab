@@ -3,9 +3,11 @@
 import argparse
 import json
 import sys
+from backend.logging_utils import get_logger
 
 
 def main():
+    logger = get_logger()
     parser = argparse.ArgumentParser(
         description="DataYab: explore, clean and model tabular datasets."
     )
@@ -31,7 +33,6 @@ def main():
     try:
         if args.streamlit:
             import subprocess
-            import sys
             from pathlib import Path
             streamlit_path = str(Path(__file__).resolve().parent / "frontend" / "streamlit" / "app.py")
             subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
@@ -57,6 +58,7 @@ def main():
     except (KeyboardInterrupt, EOFError):
         return 130
     except (ImportError, ModuleNotFoundError) as exc:
+        logger.exception("Startup dependency failure")
         print(
             "\nDataYab could not start because a required dependency is missing.\n"
             "\nUse the assigned environment and install the project requirements first:\n"
@@ -69,6 +71,7 @@ def main():
         )
         return 2
     except Exception as error:
+        logger.exception("Application failed")
         print(f"DataYab: {error}", file=sys.stderr)
         return 1
 

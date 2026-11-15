@@ -322,7 +322,7 @@ class InsightsGenerator:
             "extraction_components": self.fe._extraction_components,
             "metrics": self.mt.metrics,
             "feature_importance": self.mt.feature_importance,
-            "cross_validation": self.mt.get_cross_val_score(cv=5) if self.mt.model else None,
+            "cross_validation": None,
             "preprocessing": {
                 "scale": self.fe._scale,
                 "scaler_type": self.fe._scaler_type,
@@ -333,6 +333,13 @@ class InsightsGenerator:
         }
 
         # Add warnings
+        if self.fe._raw_train is not None:
+            try:
+                card["cross_validation"] = self.mt.get_cross_val_score(cv=5)
+            except ValueError as error:
+                card["warnings"].append(f"Cross-validation unavailable: {error}")
+        else:
+            card["warnings"].append("Imported model: training data and cross-validation are unavailable.")
         if self.fe._selection_data_driven:
             card["warnings"].append(
                 "Feature selection was data-driven on training set; CV is conditional on these choices."

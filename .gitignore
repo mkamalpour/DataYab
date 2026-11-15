@@ -28,6 +28,7 @@ Thumbs.db
 .ipynb_checkpoints/
 .streamlit/secrets.toml
 *.log
+/logs/
 *.db
 *.db-*
 *.sqlite*

@@ -274,7 +274,7 @@ class ValidationGuard:
                     if item["type"] == "numeric":
                         dummy_input[item["name"]] = item.get("mean", 0)
                     else:
-                        options = item.get("options", ["Unknown"])
+                        options = item.get("options") or ["Unknown"]
                         dummy_input[item["name"]] = options[0]
 
                 pred = self.mt.model.predict(pd.DataFrame([dummy_input]))
@@ -284,11 +284,16 @@ class ValidationGuard:
                 results["valid"] = False
 
         # Check if all required components are present
-        required = ["model", "target_encoder", "_model_schema", "_active_input_names"]
+        required = ["model", "_model_schema", "_active_input_names"]
         for req in required:
             if not hasattr(self.mt, req) or getattr(self.mt, req) is None:
                 results["errors"].append(f"Missing required component: {req}")
                 results["valid"] = False
+
+        if self.fe.problem_type == "classification" and self.fe.target_encoder is None:
+            results["errors"].append("Missing classification target encoder.")
+            results["valid"] = False
+        results["summary"] = f"{len(results['errors'])} errors, {len(results['warnings'])} warnings"
 
         return results
 

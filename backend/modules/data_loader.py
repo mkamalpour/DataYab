@@ -299,6 +299,11 @@ class DataLoader:
             "datetime": list(self.df.select_dtypes(include=["datetime64"]).columns),
         }
 
+    def get_correlation_matrix(self) -> pd.DataFrame:
+        if self.df is None:
+            raise ValueError("No dataset loaded.")
+        return self.df.select_dtypes(include=np.number).corr()
+
     def export_cleaned_csv(self, file_path: str) -> dict:
         if self.df is None:
             raise ValueError("No dataset loaded.")

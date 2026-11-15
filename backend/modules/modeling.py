@@ -85,7 +85,7 @@ def _schema_for(raw_train: pd.DataFrame, names: List[str], numeric_columns: List
             schema.append({
                 "name": name,
                 "type": "categorical",
-                "options": col.dropna().unique().tolist()[:100],
+                "options": col.dropna().unique().tolist()[:100] or ["Unknown"],
             })
     return schema
 
@@ -276,7 +276,8 @@ class ModelTrainer:
                 if best is None or cv["mean"] > best[0]:
                     best = (cv["mean"], name)
             except (ValueError, TypeError) as error:
-                pass
+                from ..logging_utils import get_logger
+                get_logger().warning("Model comparison skipped %s: %s", name, error)
 
         if best is None:
             raise ValueError("No model could be compared. Check sample count and options.")
@@ -507,7 +508,7 @@ class HyperparameterTuner:
         if model_name not in models:
             raise ValueError(f"Unknown model: {model_name}")
 
-        supported = {"Random Forest", "Gradient Boosting", "Logistic Regression", "SVM", "KNN", "XGBoost"}
+        supported = {"Random Forest", "Gradient Boosting", "Logistic Regression", "SVM", "SVR", "KNN", "XGBoost"}
         if model_name not in supported:
             raise ValueError("No Optuna search space for this model. Use grid search.")
 
@@ -525,7 +526,7 @@ class HyperparameterTuner:
                 params["subsample"] = trial.suggest_float("subsample", 0.6, 1.0)
             elif model_name == "Logistic Regression":
                 params["C"] = trial.suggest_float("C", 0.01, 100, log=True)
-            elif model_name == "SVM":
+            elif model_name in ("SVM", "SVR"):
                 params["C"] = trial.suggest_float("C", 0.01, 100, log=True)
                 params["gamma"] = trial.suggest_categorical("gamma", ["scale", "auto"])
             elif model_name == "KNN":

@@ -210,7 +210,7 @@ class DataCleaner:
                     "Lower": info["lower_bound"],
                     "Upper": info["upper_bound"],
                 })
-        return pd.DataFrame(results).sort_values("Outliers", ascending=False)
+        return pd.DataFrame(results, columns=["Column", "Outliers", "Percent", "Lower", "Upper"]).sort_values("Outliers", ascending=False)
 
     def detect_outliers_isolation_forest(self, contamination: float = 0.1) -> dict:
         self._require_data()
@@ -218,8 +218,10 @@ class DataCleaner:
         if not numeric_cols:
             return {"success": False, "message": "No numeric columns found"}
 
+        values = self.data_loader.df[numeric_cols].replace([np.inf, -np.inf], np.nan)
+        values = values.fillna(values.median()).fillna(0)
         iso_forest = IsolationForest(contamination=contamination, random_state=42)
-        outlier_labels = iso_forest.fit_predict(self.data_loader.df[numeric_cols])
+        outlier_labels = iso_forest.fit_predict(values)
         n_outliers = (outlier_labels == -1).sum()
         outlier_indices = np.where(outlier_labels == -1)[0].tolist()
 
@@ -238,10 +240,9 @@ class DataCleaner:
         if not info["success"]:
             return info
 
-        numeric_cols = list(self.data_loader.df.select_dtypes(include=np.number).columns)
-        iso_forest = IsolationForest(contamination=contamination, random_state=42)
-        outlier_labels = iso_forest.fit_predict(self.data_loader.df[numeric_cols])
-        self.data_loader.df = self.data_loader.df[outlier_labels != -1].reset_index(drop=True)
+        keep = np.ones(len(self.data_loader.df), dtype=bool)
+        keep[info["outlier_indices"]] = False
+        self.data_loader.df = self.data_loader.df.iloc[keep].reset_index(drop=True)
         self.data_loader._log(f"Removed {info['count']} outliers using Isolation Forest")
         return {
             "success": True,

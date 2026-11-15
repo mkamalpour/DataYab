@@ -313,14 +313,15 @@ class Visualizer:
             raise ValueError("Need training data for partial dependence.")
 
         # Map feature names to indices
-        feature_indices = [self.fe.feature_names.index(f) for f in features if f in self.fe.feature_names]
+        raw_names = list(self.fe._raw_train.columns)
+        feature_indices = [raw_names.index(f) for f in features if f in self.fe._selected_input_names]
         if not feature_indices:
             raise ValueError("No valid features found for partial dependence.")
 
         fig, ax = plt.subplots(figsize=(10, 6))
         display = PartialDependenceDisplay.from_estimator(
             self.mt.model, self.fe._raw_train, feature_indices,
-            feature_names=self.fe.feature_names, kind=kind, ax=ax, n_jobs=1
+            feature_names=raw_names, kind=kind, ax=ax, n_jobs=1
         )
         ax.set_title("Partial Dependence Plots", fontsize=13, fontweight="bold")
         plt.tight_layout()
@@ -342,18 +343,10 @@ class Visualizer:
                 corr[[target]].drop(target).abs()
                 .sort_values(target, ascending=False).head(n)
             )
-        pairs = corr.abs().unstack()
-        idx = pairs.index.to_frame()
-        pair_sets = [frozenset((i, j)) for i, j in idx.values]
-        pairs.index = pd.MultiIndex.from_tuples([(p, "") for p in pair_sets])
-        pairs = pairs[~pairs.index.duplicated(keep="first")]
-        pairs = pairs[pairs < 1].sort_values(ascending=False).head(n)
-        readable = []
-        for s in pairs.index.get_level_values(0):
-            lst = list(s)
-            readable.append(f"{lst[0]} ↔ {lst[1]}")
-        pairs.index = readable
-        return pd.DataFrame({"correlation": pairs})
+        pairs = corr.where(np.triu(np.ones(corr.shape, dtype=bool), k=1)).stack()
+        pairs = pairs.abs().sort_values(ascending=False).head(n)
+        return pd.DataFrame({"correlation": pairs.to_numpy()},
+                            index=[f"{left} ↔ {right}" for left, right in pairs.index])
 
     def get_value_counts(self, column: str, top_n: int = 20) -> pd.DataFrame:
         self._require_data()

@@ -23,6 +23,7 @@ from contextlib import contextmanager
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.core import DataYabCore
+from backend.logging_utils import get_logger, log_path, recent_log
 
 
 # ==================== PAGE CONFIG ====================
@@ -317,6 +318,32 @@ def temporary_file(data, suffix):
         yield str(path)
 
 
+def format_metric(value):
+    try:
+        return f"{float(value):.4f}" if value is not None and np.isfinite(float(value)) else "N/A"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def report_error(message):
+    logger = get_logger()
+    if sys.exc_info()[0] is not None:
+        logger.exception("UI operation failed")
+    else:
+        logger.warning("UI operation rejected: %s", message)
+    st.error(str(message))
+
+
+@contextmanager
+def guarded_tab(tab, number):
+    with tab:
+        try:
+            yield
+        except Exception as error:
+            report_error(f"Could not complete this action: {error}")
+            st.caption("Details were recorded in Diagnostics. Other tabs remain available.")
+
+
 def prepare_export(core, kind, key):
     extension = '.joblib' if kind == 'pipeline' else '.html'
     if st.button('Prepare ' + kind, key=key):
@@ -327,9 +354,9 @@ def prepare_export(core, kind, key):
                 if result.get('success'):
                     st.session_state[key + '_data'] = path.read_bytes()
                 else:
-                    st.error(result.get('message', 'Export failed'))
+                    report_error(result.get('message', 'Export failed'))
         except Exception as error:
-            st.error(str(error))
+            report_error(str(error))
     if key + '_data' in st.session_state:
         st.download_button('Download ' + kind, st.session_state[key + '_data'],
                            'datayab' + extension, key=key + '_download')
@@ -342,7 +369,7 @@ def main():
     st.session_state.split_done = core.feature_engineer._raw_train is not None
     st.session_state.model_trained = core.model is not None
 
-    current_table = id(core.df)
+    current_table = (id(core.df), getattr(core, "_data_revision", 0), id(core.model))
     if st.session_state.get('_analysis_table') != current_table:
         for key in list(st.session_state):
             if key.endswith('_data') or key in ('ts_result', 'cluster_result', 'anomaly_result'):
@@ -359,6 +386,12 @@ def main():
 
     # Sidebar - Status
     with st.sidebar:
+        with st.expander("Diagnostics / logs"):
+            st.caption(str(log_path()))
+            tail = recent_log()
+            st.download_button("Download recent log", tail, "datayab-diagnostics.log", "text/plain", key="diagnostic_log")
+            if st.checkbox("Show recent log"):
+                st.code(tail[-12000:], language="text")
         st.header("📋 Status")
         if core.data_loader.df is not None:
             info = core.get_info()
@@ -411,7 +444,7 @@ def main():
     ])
 
     # ==================== TAB 1: UPLOAD DATA ====================
-    with tabs[0]:
+    with guarded_tab(tabs[0], 1):
         st.header("📁 Upload Dataset")
 
         uploaded_file = st.file_uploader(
@@ -427,7 +460,7 @@ def main():
                     with temporary_file(uploaded_file.getvalue(), Path(uploaded_file.name).suffix) as tmp_path:
                         result = core.load_file(tmp_path)
                 except Exception as error:
-                    st.error(str(error))
+                    report_error(str(error))
                     return
 
                 if result["success"]:
@@ -462,10 +495,10 @@ def main():
                         })
                         st.dataframe(col_info, use_container_width=True)
                 else:
-                    st.error(result["message"])
+                    report_error(result["message"])
 
     # ==================== TAB 2: EXPLORE ====================
-    with tabs[1]:
+    with guarded_tab(tabs[1], 2):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         else:
@@ -560,7 +593,7 @@ def main():
                     st.dataframe(vc_df, use_container_width=True)
 
     # ==================== TAB 3: CLEAN DATA ====================
-    with tabs[2]:
+    with guarded_tab(tabs[2], 3):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         else:
@@ -592,7 +625,7 @@ def main():
                             st.success(result["message"])
                             st.rerun()
                         else:
-                            st.error(result["message"])
+                            report_error(result["message"])
 
             with col2:
                 st.markdown("**Other Operations**")
@@ -655,7 +688,7 @@ def main():
                         st.rerun()
 
     # ==================== TAB 4: FEATURES ====================
-    with tabs[3]:
+    with guarded_tab(tabs[3], 4):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         elif not st.session_state.split_done:
@@ -706,7 +739,7 @@ def main():
                             st.success(f"Selected {result['total']} features: {', '.join(result['selected'][:10])}{'...' if len(result['selected']) > 10 else ''}")
                             st.rerun()
                         else:
-                            st.error(result.get("message", "Failed"))
+                            report_error(result.get("message", "Failed"))
 
             with col2:
                 if st.button("Show Feature Scores"):
@@ -743,7 +776,11 @@ def main():
                     ["pca", "svd", "lda"],
                     format_func=lambda x: {"pca": "PCA", "svd": "Truncated SVD", "lda": "LDA"}[x]
                 )
-                n_components = st.number_input("Components", 1, 50, 2)
+                component_limit = min(len(core.feature_engineer._selected_input_names), len(core.y_train))
+                if ext_method == "lda":
+                    component_limit = min(component_limit, len(np.unique(core.y_train)) - 1) if core.problem_type == "classification" else 1
+                component_limit = max(1, component_limit)
+                n_components = st.number_input("Components", 1, component_limit, min(2, component_limit))
 
                 if st.button("Apply Extraction"):
                     with st.spinner("Applying extraction..."):
@@ -754,7 +791,7 @@ def main():
                                 st.info(f"Explained variance: {result['total_variance']:.2%}")
                             st.rerun()
                         else:
-                            st.error(result.get("message", "Failed"))
+                            report_error(result.get("message", "Failed"))
 
             with col2:
                 if st.button("Restore Original Features"):
@@ -777,7 +814,7 @@ def main():
                         st.dataframe(perm_df, use_container_width=True)
 
     # ==================== TAB 5: TRAIN MODEL ====================
-    with tabs[4]:
+    with guarded_tab(tabs[4], 5):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         else:
@@ -863,20 +900,20 @@ def main():
                             st.subheader("Model Metrics")
                             if core.problem_type == "classification":
                                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                                mcol1.metric("Accuracy", f"{metrics.get('accuracy', 0):.4f}")
-                                mcol2.metric("Balanced Acc", f"{metrics.get('balanced_accuracy', 0):.4f}")
-                                mcol3.metric("F1 (weighted)", f"{metrics.get('f1', 0):.4f}")
-                                mcol4.metric("ROC-AUC", f"{metrics.get('roc_auc', 0):.4f}")
+                                mcol1.metric("Accuracy", format_metric(metrics.get('accuracy')))
+                                mcol2.metric("Balanced Acc", format_metric(metrics.get('balanced_accuracy')))
+                                mcol3.metric("F1 (weighted)", format_metric(metrics.get('f1')))
+                                mcol4.metric("ROC-AUC", format_metric(metrics.get('roc_auc')))
                             else:
                                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                                mcol1.metric("R²", f"{metrics.get('r2', 0):.4f}")
-                                mcol2.metric("RMSE", f"{metrics.get('rmse', 0):.4f}")
-                                mcol3.metric("MAE", f"{metrics.get('mae', 0):.4f}")
-                                mcol4.metric("RMSE Skill", f"{metrics.get('rmse_skill', 0):.4f}")
+                                mcol1.metric("R²", format_metric(metrics.get('r2')))
+                                mcol2.metric("RMSE", format_metric(metrics.get('rmse')))
+                                mcol3.metric("MAE", format_metric(metrics.get('mae')))
+                                mcol4.metric("RMSE Skill", format_metric(metrics.get('rmse_skill')))
                         else:
-                            st.error(train_result.get("message", "Training failed"))
+                            report_error(train_result.get("message", "Training failed"))
                     else:
-                        st.error(split_result.get("message", "Split failed"))
+                        report_error(split_result.get("message", "Split failed"))
 
             # Compare All Models
             st.divider()
@@ -897,15 +934,15 @@ def main():
             st.subheader("🎯 Hyperparameter Tuning")
 
             tune_method = st.selectbox("Tuning Method", ["Optuna", "GridSearchCV"])
-            tune_model = st.selectbox("Model to Tune", ["Random Forest", "Gradient Boosting", "XGBoost", "Logistic Regression", "SVM", "KNN"])
+            tune_model = st.selectbox("Model to Tune", [name for name in model_catalog(task) if name in {"Random Forest", "Gradient Boosting", "XGBoost", "Logistic Regression", "SVM", "SVR", "KNN"}])
             n_trials = st.number_input("Trials (Optuna)", 10, 500, 50)
             cv_folds = st.number_input("CV Folds", 2, 10, 3)
 
             if st.button("Run Hyperparameter Tuning"):
                 with st.spinner(f"Running {tune_method}..."):
                     # Need to split first if not done
-                    if not st.session_state.split_done:
-                        core.split_data(target_col, test_size=test_size, problem_type=problem_type)
+                    # Reuse identical splits; refresh changed target/task/options.
+                    core.split_data(target_col, test_size=test_size, problem_type=problem_type)
 
                     if tune_method == "Optuna":
                         result = core.tune_with_optuna(tune_model, n_trials=n_trials, cv_folds=cv_folds)
@@ -916,6 +953,7 @@ def main():
                             "Gradient Boosting": {"n_estimators": [50, 100, 200], "max_depth": [3, 5, 7], "learning_rate": [0.01, 0.1, 0.2]},
                             "Logistic Regression": {"C": [0.01, 0.1, 1, 10, 100]},
                             "SVM": {"C": [0.01, 0.1, 1, 10, 100]},
+                            "SVR": {"C": [0.1, 1, 10]},
                             "KNN": {"n_neighbors": [3, 5, 7, 9, 11]},
                         }
                         result = core.tune_with_gridsearch(tune_model, param_grids.get(tune_model, {}), cv_folds=cv_folds)
@@ -924,7 +962,7 @@ def main():
                         st.success(f"Best Score: {result['best_score']:.4f}")
                         st.json(result["best_params"])
                     else:
-                        st.error(result.get("message", "Tuning failed"))
+                        report_error(result.get("message", "Tuning failed"))
 
             # Stacked Model
             st.divider()
@@ -933,7 +971,7 @@ def main():
             if len(trained_models) >= 2:
                 base1 = st.selectbox("Base Model 1", trained_models, key="stack1")
                 base2 = st.selectbox("Base Model 2", trained_models, key="stack2")
-                meta = st.selectbox("Meta Learner", ["Logistic Regression", "Random Forest", "Gradient Boosting", "SVM"])
+                meta = st.selectbox("Meta Learner", list(model_catalog(core.problem_type)))
 
                 if st.button("Train Stacked Model") and base1 != base2:
                     with st.spinner("Training stacked model..."):
@@ -943,12 +981,12 @@ def main():
                             st.session_state.model_trained = True
                             st.rerun()
                         else:
-                            st.error(result.get("message", "Failed"))
+                            report_error(result.get("message", "Failed"))
             else:
                 st.info("Train at least 2 models to create a stacked model.")
 
     # ==================== TAB 6: EVALUATE ====================
-    with tabs[5]:
+    with guarded_tab(tabs[5], 6):
         if not st.session_state.model_trained:
             st.warning("Please train a model first.")
         elif core.feature_engineer._raw_test is None:
@@ -971,29 +1009,29 @@ def main():
 
             if core.problem_type == "classification":
                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                mcol1.metric("Accuracy", f"{metrics.get('accuracy', 0):.4f}")
-                mcol2.metric("Balanced Accuracy", f"{metrics.get('balanced_accuracy', 0):.4f}")
-                mcol3.metric("Macro F1", f"{metrics.get('macro_f1', 0):.4f}")
-                mcol4.metric("ROC-AUC", f"{metrics.get('roc_auc', 0):.4f}")
+                mcol1.metric("Accuracy", format_metric(metrics.get('accuracy')))
+                mcol2.metric("Balanced Accuracy", format_metric(metrics.get('balanced_accuracy')))
+                mcol3.metric("Macro F1", format_metric(metrics.get('macro_f1')))
+                mcol4.metric("ROC-AUC", format_metric(metrics.get('roc_auc')))
 
                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                mcol1.metric("Precision", f"{metrics.get('precision', 0):.4f}")
-                mcol2.metric("Recall", f"{metrics.get('recall', 0):.4f}")
-                mcol3.metric("F1 (weighted)", f"{metrics.get('f1', 0):.4f}")
-                mcol4.metric("Majority Baseline", f"{metrics.get('majority_baseline_accuracy', 0):.4f}")
+                mcol1.metric("Precision", format_metric(metrics.get('precision')))
+                mcol2.metric("Recall", format_metric(metrics.get('recall')))
+                mcol3.metric("F1 (weighted)", format_metric(metrics.get('f1')))
+                mcol4.metric("Majority Baseline", format_metric(metrics.get('majority_baseline_accuracy')))
 
                 with st.expander("Classification Report"):
                     st.text(metrics.get('classification_report', 'N/A'))
             else:
                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                mcol1.metric("R²", f"{metrics.get('r2', 0):.4f}")
-                mcol2.metric("RMSE", f"{metrics.get('rmse', 0):.4f}")
-                mcol3.metric("MAE", f"{metrics.get('mae', 0):.4f}")
-                mcol4.metric("RMSE Skill", f"{metrics.get('rmse_skill', 0):.4f}")
+                mcol1.metric("R²", format_metric(metrics.get('r2')))
+                mcol2.metric("RMSE", format_metric(metrics.get('rmse')))
+                mcol3.metric("MAE", format_metric(metrics.get('mae')))
+                mcol4.metric("RMSE Skill", format_metric(metrics.get('rmse_skill')))
 
                 mcol1, mcol2 = st.columns(2)
-                mcol1.metric("Baseline MAE", f"{metrics.get('baseline_mae', 0):.4f}")
-                mcol2.metric("Baseline RMSE", f"{metrics.get('baseline_rmse', 0):.4f}")
+                mcol1.metric("Baseline MAE", format_metric(metrics.get('baseline_mae')))
+                mcol2.metric("Baseline RMSE", format_metric(metrics.get('baseline_rmse')))
 
             # Visualizations
             st.divider()
@@ -1015,8 +1053,8 @@ def main():
                             fpr, tpr, _ = roc_curve(core.feature_engineer.y_test, core.model_trainer.y_proba[:, 1])
                             fig = plotly_roc_curve(fpr, tpr)
                             st.plotly_chart(fig, use_container_width=True)
-                        except:
-                            st.error("ROC requires binary classification with probabilities")
+                        except Exception:
+                            report_error("ROC requires binary classification with probabilities")
 
                     if st.button("Precision-Recall Curve"):
                         try:
@@ -1024,8 +1062,8 @@ def main():
                             precision, recall, _ = precision_recall_curve(core.feature_engineer.y_test, core.model_trainer.y_proba[:, 1])
                             fig = plotly_precision_recall(precision, recall)
                             st.plotly_chart(fig, use_container_width=True)
-                        except:
-                            st.error("PR curve requires binary classification with probabilities")
+                        except Exception:
+                            report_error("PR curve requires binary classification with probabilities")
                 else:
                     if st.button("Residuals Plot"):
                         core.model_trainer._compute_predictions()
@@ -1045,30 +1083,24 @@ def main():
                         from sklearn.model_selection import learning_curve
                         train_sizes, train_scores, test_scores = learning_curve(
                             core.model, core.feature_engineer._raw_train, core.feature_engineer.y_train,
-                            train_sizes=np.linspace(0.1, 1.0, 10), cv=5, n_jobs=1,
+                            train_sizes=np.linspace(0.5, 1.0, 5), cv=core.model_trainer._cv_splitter(5), n_jobs=1,
+                            error_score="raise",
                             scoring="accuracy" if core.problem_type == "classification" else "r2"
                         )
                         fig = plotly_learning_curve(train_sizes, train_scores, test_scores)
                         st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
-                        st.error(f"Learning curve failed: {e}")
+                        report_error(f"Learning curve failed: {e}")
 
-                if st.button("Partial Dependence"):
-                    features = list(core.feature_importance.keys())[:5] if core.feature_importance else core.feature_engineer.feature_names[:5]
-                    feat = st.selectbox("Feature", features)
-                    if feat:
-                        try:
-                            from sklearn.inspection import PartialDependenceDisplay
-                            import matplotlib.pyplot as plt
-                            fig, ax = plt.subplots(figsize=(8, 5))
-                            PartialDependenceDisplay.from_estimator(
-                                core.model, core.feature_engineer._raw_train,
-                                [core.feature_engineer.feature_names.index(feat)],
-                                feature_names=core.feature_engineer.feature_names, ax=ax
-                            )
-                            st.pyplot(fig)
-                        except Exception as e:
-                            st.error(f"Partial dependence failed: {e}")
+                pd_features = [name for name in core.feature_engineer._selected_input_names
+                               if name in core.feature_engineer._numeric_columns]
+                if pd_features:
+                    feat = st.selectbox("Partial dependence feature", pd_features)
+                    if st.button("Partial Dependence"):
+                        image = core.plot_partial_dependence([feat])
+                        st.image(base64.b64decode(image))
+                else:
+                    st.info("Partial dependence needs a selected numeric input.")
 
             # Cross Validation
             st.divider()
@@ -1094,7 +1126,7 @@ def main():
                     st.success("No misclassified samples!")
 
     # ==================== TAB 7: PREDICT ====================
-    with tabs[6]:
+    with guarded_tab(tabs[6], 7):
         if not st.session_state.model_trained:
             st.warning("Please train a model first.")
         else:
@@ -1117,7 +1149,7 @@ def main():
                         with cols[i % 2]:
                             if field["type"] == "categorical":
                                 inputs[field["name"]] = st.selectbox(
-                                    field["name"], field.get("options", []), key=f"pred_{field['name']}"
+                                    field["name"], field.get("options") or ["Unknown"], key=f"pred_{field['name']}"
                                 )
                             else:
                                 inputs[field["name"]] = st.number_input(
@@ -1197,7 +1229,7 @@ def main():
                             df_to_csv_download(result_df, "batch_predictions.csv")
 
     # ==================== TAB 8: INSIGHTS ====================
-    with tabs[7]:
+    with guarded_tab(tabs[7], 8):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         else:
@@ -1253,7 +1285,7 @@ def main():
                     st.json(card)
 
     # ==================== TAB 9: VALIDATION ====================
-    with tabs[8]:
+    with guarded_tab(tabs[8], 9):
         if not st.session_state.data_loaded:
             st.warning("Please upload a dataset first.")
         else:
@@ -1268,10 +1300,10 @@ def main():
                         if result['valid']:
                             st.success("✅ Pipeline Valid")
                         else:
-                            st.error("❌ Pipeline Invalid")
+                            report_error("❌ Pipeline Invalid")
 
                         for err in result['errors']:
-                            st.error(f"❌ {err}")
+                            report_error(f"❌ {err}")
                         for warn in result['warnings']:
                             st.warning(f"⚠️ {warn}")
 
@@ -1282,10 +1314,10 @@ def main():
                         if result['valid']:
                             st.success("✅ Ready for Deployment")
                         else:
-                            st.error("❌ Not Ready for Deployment")
+                            report_error("❌ Not Ready for Deployment")
 
                         for err in result['errors']:
-                            st.error(f"❌ {err}")
+                            report_error(f"❌ {err}")
                         for warn in result['warnings']:
                             st.warning(f"⚠️ {warn}")
                         if 'prediction_test' in result:
@@ -1335,12 +1367,12 @@ def main():
                         st.session_state.split_done = False
                         st.rerun()
                     else:
-                        st.error(result.get('message', 'Import failed'))
+                        report_error(result.get('message', 'Import failed'))
                 except Exception as error:
-                    st.error(str(error))
+                    report_error(str(error))
 
     # ==================== ADVANCED ANALYTICS ====================
-    with tabs[9]:
+    with guarded_tab(tabs[9], 10):
         st.header("Time Series")
         st.caption("Analysis uses a separate copy sorted by time. Use unique, regularly spaced dates. Forecasts have not been validated on a time-ordered holdout.")
         if core.df is None:
@@ -1388,7 +1420,7 @@ def main():
                         if not result.get('success'): raise ValueError(result.get('message'))
                         st.session_state.ts_result = result
                     except Exception as error:
-                        st.error(str(error))
+                        report_error(str(error))
                 result = st.session_state.get('ts_result')
                 if result:
                     if 'table' in result:
@@ -1397,7 +1429,7 @@ def main():
                     st.json({k: v for k, v in result.items() if k not in ('table', 'decomposition')})
                     st.caption("ADF p < 0.05 provides evidence against a unit root, not proof of forecast accuracy.")
 
-    with tabs[10]:
+    with guarded_tab(tabs[10], 11):
         st.header("Clustering")
         st.caption("Numeric inputs are standardized; rows with missing inputs are excluded. Cluster numbers are arbitrary labels; DBSCAN uses -1 for noise. Working data is preserved.")
         if core.df is None:
@@ -1419,7 +1451,7 @@ def main():
                     if not result.get('success'): raise ValueError(result.get('message'))
                     st.session_state.cluster_result = (result, features)
                 except Exception as error:
-                    st.error(str(error))
+                    report_error(str(error))
             if st.session_state.get('cluster_result'):
                 result, selected = st.session_state.cluster_result
                 frame = result['result_df']
@@ -1430,7 +1462,7 @@ def main():
                 st.json({k: v for k, v in result.items() if k not in ('result_df', 'labels', 'probabilities', 'covariances')})
                 df_to_csv_download(frame, 'cluster_assignments.csv')
 
-    with tabs[11]:
+    with guarded_tab(tabs[11], 12):
         st.header("Anomaly Detection")
         st.caption("Flags are prompts for investigation. Incomplete rows are excluded and the working table stays intact. Z-score and IQR flag a row when any selected feature is unusual.")
         if core.df is None:
@@ -1451,7 +1483,7 @@ def main():
                     if not result.get('success'): raise ValueError(result.get('message'))
                     st.session_state.anomaly_result = (result, features)
                 except Exception as error:
-                    st.error(str(error))
+                    report_error(str(error))
             if st.session_state.get('anomaly_result'):
                 result, selected = st.session_state.anomaly_result
                 frame = result['result_df']

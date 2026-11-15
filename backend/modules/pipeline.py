@@ -80,8 +80,24 @@ class PipelineManager:
         if not required_keys.issubset(package) or not package.get("schema") or not hasattr(package.get("model"), "predict"):
             raise ValueError("Incomplete prediction package.")
 
+        schema = package["schema"]
+        names = package["input_names"]
+        if (not isinstance(schema, list) or not isinstance(names, list)
+                or not names or any(not isinstance(name, str) for name in names)
+                or len(set(names)) != len(names)
+                or any(not isinstance(item, dict) or item.get("type") not in ("numeric", "categorical")
+                       or not isinstance(item.get("name"), str) for item in schema)
+                or [item["name"] for item in schema] != names
+                or package["problem_type"] not in ("classification", "regression")
+                or not isinstance(package["feature_names"], list)
+                or not callable(package["model"].predict)):
+            raise ValueError("Invalid prediction package schema.")
+        if package["problem_type"] == "classification" and not callable(getattr(package["target_encoder"], "inverse_transform", None)):
+            raise ValueError("Missing classification target encoder.")
+
         # Reset all state
         self.mt._reset_learning()
+        self.fe.__init__(self.dl)
         self.fe._raw_train = None
         self.fe._raw_test = None
         self.fe.y_train = None

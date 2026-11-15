@@ -22,6 +22,7 @@ os.environ["JOBLIB_MULTIPROCESSING"] = "0"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.core import DataYabCore
+from backend.logging_utils import get_logger
 
 # ================================
 # Global styling
@@ -47,6 +48,7 @@ class DataYabApp:
 
     def __init__(self):
         self.root = tk.Tk()
+        self.root.report_callback_exception = self._report_callback_exception
         self.root.title("DataYab | Dataset workbench")
         self.root.geometry("1180x800")
         self.root.minsize(980, 660)
@@ -318,6 +320,10 @@ class DataYabApp:
         if hasattr(self, "tab_predict") and hasattr(self.tab_predict, "predict_btn"):
             self.tab_predict.predict_btn.config(state=tk.NORMAL)
 
+    def _report_callback_exception(self, exception_type, value, traceback):
+        get_logger().error("Desktop callback failed", exc_info=(exception_type, value, traceback))
+        messagebox.showerror("Operation failed", f"{value}\n\nDetails were saved in logs/datayab.log.")
+
     def run_threaded(self, target_func, on_complete=None):
         if self.is_processing:
             self.set_status("Please wait for the current operation.")
@@ -331,6 +337,7 @@ class DataYabApp:
                     raise ValueError(result.get("message", "Operation failed."))
                 results.put((result, None))
             except Exception as error:
+                get_logger().exception("Desktop background operation failed")
                 results.put((None, str(error)))
 
         def poll():
@@ -346,6 +353,7 @@ class DataYabApp:
                 try:
                     on_complete(result)
                 except Exception as error:
+                    get_logger().exception("Desktop result display failed")
                     messagebox.showerror("Display error", str(error))
 
         self.start_processing()

@@ -96,6 +96,13 @@ Existing datasets and reports remain local, excluded from Git alongside model pa
 
 ## Validation
 
+Diagnostics are written to `logs/datayab.log` with timestamps, operation durations
+and exception tracebacks. Logs rotate at 2 MB with three backups. Streamlit's
+sidebar offers **Diagnostics / logs** to view or download the latest entries.
+Set `DATAYAB_LOG_DIR` to use another location; if it is unwritable, diagnostics
+fall back to the console. Logs are excluded from Git. Review logs before sharing:
+exception messages can include file paths or column names.
+
 ```powershell
 # Install dependencies if they are not already available in your environment.
 python -m pip install pytest==9.1.1 httpx==0.28.1
