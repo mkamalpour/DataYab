@@ -3,16 +3,14 @@
 import numpy as np
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
 from backend.core import DataYabCore
-from frontend import web
 
 
 @pytest.fixture
 def core():
     c = DataYabCore()
     x = np.arange(120, dtype=float)
-    c._set_dataset(
+    c.data_loader._set_dataset(
         pd.DataFrame(
             {"amount": x, "group": ["a", "b", "c"] * 40, "target": ["no", "yes"] * 60}
         )
@@ -103,57 +101,6 @@ def test_model_selection_and_reset(core):
     assert core.model is None and not core.trained_models
 
 
-def test_api_workflow_and_errors(core):
-    web.core = DataYabCore()
-    client = TestClient(web.app)
-    assert client.get("/api/evaluate").status_code == 400
-    csv = core.df.to_csv(index=False)
-    assert (
-        client.post(
-            "/api/upload", files={"file": ("../../sample.csv", csv, "text/csv")}
-        ).status_code
-        == 200
-    )
-    assert web.core.file_path == "sample.csv"
-    assert (
-        client.post(
-            "/api/train", json={"target": "target", "model": "Decision Tree"}
-        ).status_code
-        == 200
-    )
-    assert client.post("/api/feature/pca?components=1").status_code == 200
-    assert (
-        client.post(
-            "/api/train", json={"target": "target", "model": "Decision Tree"}
-        ).status_code
-        == 200
-    )
-    assert (
-        client.post("/api/predict", json={"amount": 12, "group": "unknown"}).status_code
-        == 200
-    )
-    assert client.post("/api/predict", json={}).status_code == 400
-    assert client.get("/api/cross-validation").status_code == 200
-    assert client.get("/api/export/report").status_code == 200
-    assert client.post("/api/reset").status_code == 200
-    assert client.get("/api/evaluate").status_code == 400
-
-
-def test_api_rejects_foreign_origin_and_large_request():
-    client = TestClient(web.app)
-    assert (
-        client.post("/api/reset", headers={"origin": "https://example.com"}).status_code
-        == 403
-    )
-    assert client.get("/", headers={"host": "example.com"}).status_code == 400
-    assert (
-        client.post(
-            "/api/upload", headers={"content-length": str(60 * 1024 * 1024)}
-        ).status_code
-        == 413
-    )
-
-
 def test_report_escapes_user_data(core, tmp_path):
     core.file_path = "<script>alert(1)</script>"
     core.df["<script>"] = "<img src=x onerror=alert(1)>"
@@ -175,7 +122,8 @@ def test_single_column_csv_is_not_split_on_letters(tmp_path):
 
 @pytest.mark.parametrize("export", ["cleaned", "report", "pipeline"])
 def test_failed_export_preserves_existing_file(core, tmp_path, monkeypatch, export):
-    from backend import modeling
+    import joblib
+    from pathlib import Path
     target = tmp_path / ("result.pkl" if export == "pipeline" else "result.csv")
     target.write_bytes(b"previous completed export")
     if export == "pipeline":
@@ -184,11 +132,10 @@ def test_failed_export_preserves_existing_file(core, tmp_path, monkeypatch, expo
         def broken_dump(package, path):
             path.write_bytes(b"partial")
             raise OSError("disk full")
-        monkeypatch.setattr(modeling.joblib, "dump", broken_dump)
+        monkeypatch.setattr(joblib, "dump", broken_dump)
         action = core.save_pipeline
     elif export == "report":
         core.file_path = "synthetic.csv"
-        from pathlib import Path
         def broken_text(path, *args, **kwargs):
             path.write_bytes(b"partial")
             raise OSError("disk full")

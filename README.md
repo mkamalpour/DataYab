@@ -2,7 +2,7 @@
 
 **[Explore the interactive project presentation](docs/overview.html)** — open locally in your browser; works offline.
 
-Open a table, find data-quality problems, and compare prediction models without writing a notebook. DataYab runs locally in a browser, as a desktop app, or from the command line.
+Open a table, find data-quality problems, and compare prediction models without writing a notebook. DataYab runs locally as a **Streamlit web app** or **Tkinter desktop app**, or from the command line.
 
 ## Try it first
 
@@ -14,15 +14,11 @@ Open a CSV or Excel table and inspect the column types and missing values before
 Assigned environment: **base**. From this repository folder in PowerShell:
 
 ```powershell
-.\run.cmd --check
-.\run.cmd
+python app.py --streamlit
 ```
 
-The repo-local launcher selects `G:\AnaConda\install`
-and imports required startup modules. It installs nothing and downloads
-no models. On a standalone clone where that interpreter is absent, it uses your
-active `python`; activate a compatible environment first. `--check` reports the
-actual interpreter; it does not validate optional models or every workflow.
+The launcher uses your active Python interpreter. Activate a compatible
+environment with the listed dependencies before launching.
 
 </details>
 
@@ -30,15 +26,23 @@ actual interpreter; it does not validate optional models or every workflow.
 
 Use **Python 3.13** (tested with 3.13.5) from an existing compatible environment. Requirements pin the versions validated together. Standard Windows Python includes Tkinter; Linux may require `python3-tk`.
 
+### Streamlit Web UI (recommended)
 ```powershell
 conda activate base  # Or use your existing compatible environment.
 # Install dependencies if they are not already available in your environment.
 python -m pip install -r requirements.txt
-python app.py --web
+python -m pip install -r requirements-streamlit.txt
+python app.py --streamlit
 ```
 
-Open http://127.0.0.1:8001. Run `python app.py --tkinter` for desktop mode (also the default). Web assets are local: no CDN or API key required.
+### Tkinter Desktop App
+```powershell
+python app.py --tkinter
+# or just
+python app.py
+```
 
+### CLI Mode
 ```powershell
 python app.py --cli --file "path/to/dataset.csv"
 python app.py --cli --file "path/to/dataset.csv" --target outcome --task classification
@@ -51,11 +55,18 @@ python tools/clean_dataset.py "path/to/Training Dataset.arff" --target Result --
 
 ## Workflow
 
-1. Load CSV, Excel, JSON records, Parquet, `.arr` array files (NumPy arrays, Arrow/Feather tables, or delimited text), or Weka `.arff` datasets. Web uploads are temporary and limited to 50 MB. Tables support up to 1,000,000 rows and 2,000 columns; flatten nested arrays/objects first.
+1. Load CSV, Excel, JSON records, Parquet, `.arr` array files (NumPy arrays, Arrow/Feather tables, or delimited text), or Weka `.arff` datasets. Tables support up to 1,000,000 rows and 2,000 columns; flatten nested arrays/objects first.
 2. Inspect the dataset quality report (duplicates, missing values, constant columns, class balance, strongest correlations). Automatic cleaning reports duplicates and converts numeric text but keeps every row; removing duplicates or outliers is an explicit action. The cleaned working table can be exported as CSV or ARFF.
-3. Choose a target and train/test split. The web UI and CLI support an explicit classification/regression override; automatic detection uses a low-cardinality integer heuristic.
+3. Choose a target and train/test split. The UI and CLI support an explicit classification/regression override; automatic detection uses a low-cardinality integer heuristic.
 4. **Feature selection** (choose which original columns feed the model) and **feature extraction** (build components from them) are separate stages. Selection offers Random Forest importance, mutual information, ANOVA F-test, correlation with the target, recursive feature elimination, a constant-column filter, and a manual column list. Extraction offers PCA, Truncated SVD, and LDA (classification only). Selection resets extraction; extraction leaves the selected columns intact. Data and feature changes clear outdated models.
 5. Evaluate holdout metrics and charts, then predict from raw inputs. Desktop mode also supports batch CSV prediction and model import/export.
+
+## Advanced Analytics (Streamlit)
+
+The Streamlit UI includes dedicated tabs for:
+- **Time Series**: Decomposition, ARIMA forecasting, stationarity testing (ADF)
+- **Clustering**: K-Means, DBSCAN, Hierarchical, Gaussian Mixture Models
+- **Anomaly Detection**: Isolation Forest, Local Outlier Factor, One-Class SVM, Z-Score, IQR
 
 ## Modeling details
 
@@ -67,15 +78,18 @@ Exported packages contain preprocessing and raw-input schemas, enabling predicti
 
 ## Local workspace and data
 
-The loopback web server has **one shared workspace** across tabs and serializes operations. It is intended for one local user, not public multi-user hosting. Large datasets and model comparisons may take time and memory.
+The application is intended for one local user. Large datasets and model comparisons may take time and memory.
 
 Existing datasets and reports remain local, excluded from Git alongside model packages, environments, and caches. Files previously published remain in older Git history.
 
 ## Structure
 
 - `app.py`: launcher and CLI
-- `backend/`: exploration, cleaning, and model pipelines
-- `frontend/`: desktop UI, web API, templates, and local assets
+- `backend/`: modular exploration, cleaning, and model pipelines
+  - `backend/core.py`: unified interface using modular components
+  - `backend/modules/`: 11 focused modules (data_loader, data_cleaner, feature_engineering, modeling, prediction, visualization, insights, pipeline, validation, advanced_analytics)
+- `frontend/desktop.py`: Tkinter desktop application
+- `frontend/streamlit/`: Streamlit web application
 - `tools/profile_data.py`: detailed JSON dataset profiler
 - `tools/clean_dataset.py`: deduplicated ARFF/CSV copy plus Markdown quality report
 - `tests/`: synthetic-data regression tests
@@ -89,9 +103,9 @@ python -m pytest tests -q
 python -m pip check
 ```
 
-Regression tests cover training-only preprocessing, model export/import, regression, stacking, state invalidation, uploads, request guards, report escaping, ARFF/ARR loading, selection and extraction methods, dataset quality reporting, and ARFF/CSV export. Browser checks cover upload-to-prediction workflows and responsive layouts.
+Regression tests cover training-only preprocessing, model export/import, regression, stacking, state invalidation, uploads, request guards, report escaping, ARFF/ARR loading, selection and extraction methods, dataset quality reporting, and ARFF/CSV export.
 
-Checked on Windows with Python 3.13.5 (Conda base): **55 tests passed**.
+Run the regression suite in your active environment to verify your installation.
 
 Prediction probabilities are uncalibrated model outputs, not guarantees of correctness. The evaluation model selector has an explicit accessible label.
 
@@ -101,8 +115,7 @@ Core cleaned-data, batch-prediction, model and HTML-report exports are staged be
 
 Failed model selection and cleaning restore the previous working state. Nested array cells are rejected before replacing a dataset, and summaries tolerate entirely missing columns.
 
-See the [engineering audit](docs/ENGINEERING_AUDIT.md) for the dated test baseline,
-project assessment, environment assignment and remaining work.
+See the [engineering audit](docs/ENGINEERING_AUDIT.md) for the dated test baseline, project assessment, environment assignment and remaining work.
 
 ## Additional workflow improvements
 

@@ -4,10 +4,8 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
-from fastapi.testclient import TestClient
 
 from backend.core import DataYabCore
-from frontend import web
 
 
 def save_numpy(path, array):
@@ -77,26 +75,12 @@ def test_load_file_dispatches_arr(tmp_path):
 
 def test_invalid_arr_fails_without_replacing_dataset(tmp_path):
     core = DataYabCore()
-    core._set_dataset(pd.DataFrame({"keep": [1, 2]}))
+    core.data_loader._set_dataset(pd.DataFrame({"keep": [1, 2]}))
     path = tmp_path / "broken.arr"
     path.write_bytes(b"not an array")
     result = core.load_arr(path)
     assert not result["success"]
     assert core.df["keep"].tolist() == [1, 2]
-
-
-def test_upload_accepts_arr(tmp_path):
-    web.core = DataYabCore()
-    client = TestClient(web.app)
-    path = tmp_path / "upload.arr"
-    save_numpy(path, np.array([[1.0, 2.0], [3.0, 4.0]]))
-    response = client.post(
-        "/api/upload",
-        files={"file": ("upload.arr", path.read_bytes(), "application/octet-stream")},
-    )
-    assert response.status_code == 200
-    assert web.core.file_path == "upload.arr"
-    assert web.core.df.shape == (2, 2)
 
 
 ARFF = """@relation demo
@@ -129,15 +113,3 @@ def test_load_file_dispatches_arff(tmp_path):
     path = tmp_path / "sample.arff"
     path.write_text(ARFF, encoding="utf-8")
     assert DataYabCore().load_file(path)["success"]
-
-
-def test_upload_accepts_arff(tmp_path):
-    web.core = DataYabCore()
-    client = TestClient(web.app)
-    response = client.post(
-        "/api/upload",
-        files={"file": ("sample.arff", ARFF.encode("utf-8"), "text/plain")},
-    )
-    assert response.status_code == 200
-    assert web.core.file_path == "sample.arff"
-    assert web.core.df.shape == (3, 3)

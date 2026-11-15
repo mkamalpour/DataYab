@@ -3,10 +3,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
 
 from backend.core import DataYabCore
-from frontend import web
 
 
 @pytest.fixture
@@ -24,7 +22,7 @@ def core():
         }
     )
     instance = DataYabCore()
-    instance._set_dataset(frame)
+    instance.data_loader._set_dataset(frame)
     instance.split_data("target")
     return instance
 
@@ -121,7 +119,7 @@ def test_extraction_is_inside_cross_validation(core):
 
 def test_dataset_quality_reports_duplicates_and_balance():
     instance = DataYabCore()
-    instance._set_dataset(
+    instance.data_loader._set_dataset(
         pd.DataFrame(
             {
                 "amount": [1, 1, 2, 3, 4, 4],
@@ -138,7 +136,7 @@ def test_dataset_quality_reports_duplicates_and_balance():
 
 def test_auto_clean_keeps_duplicates():
     instance = DataYabCore()
-    instance._set_dataset(pd.DataFrame({"x": [1, 1, 2], "y": [3, 3, 4]}))
+    instance.data_loader._set_dataset(pd.DataFrame({"x": [1, 1, 2], "y": [3, 3, 4]}))
     result = instance.auto_clean()
     assert len(instance.df) == 3
     assert result["duplicates_detected"] == 1
@@ -159,44 +157,3 @@ def test_arff_export_roundtrip(core, tmp_path):
     assert reloaded.df.shape == core.df.shape
     assert list(reloaded.df.columns) == list(core.df.columns)
     assert set(reloaded.df["group"]) == {"a", "b"}
-
-
-def test_selection_and_extraction_api(core, tmp_path):
-    web.core = core
-    client = TestClient(web.app)
-
-    status = client.get("/api/selection/status")
-    assert status.status_code == 200
-    assert status.json()["selected"] == 5
-
-    ranked = client.get("/api/selection/rank?method=anova&k=3")
-    assert ranked.status_code == 200
-    assert len(ranked.json()["scores"]) == 3
-
-    applied = client.post("/api/selection/apply", json={"method": "anova", "k": 2})
-    assert applied.status_code == 200
-    assert applied.json()["total"] == 2
-
-    extracted = client.post(
-        "/api/extraction/apply", json={"method": "pca", "components": 2}
-    )
-    assert extracted.status_code == 200
-    assert extracted.json()["features"] == ["PC1", "PC2"]
-
-    restored = client.post("/api/extraction/restore")
-    assert restored.status_code == 200
-    assert client.get("/api/selection/status").json()["extraction"] is None
-
-    assert client.post("/api/selection/restore").status_code == 200
-
-    quality = client.get("/api/dataset/quality")
-    assert quality.status_code == 200
-    assert "duplicate_rows" in quality.json()
-
-    arff = client.post("/api/export/cleaned?format=arff")
-    assert arff.status_code == 200
-    assert arff.text.startswith("@relation")
-
-    csv = client.post("/api/export/cleaned?format=csv")
-    assert csv.status_code == 200
-    assert csv.text.splitlines()[0].startswith("signal")

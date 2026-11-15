@@ -11,13 +11,13 @@ def main():
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
-        "--web", "-w", action="store_true", help="Open the local web server"
+        "--streamlit", "-s", action="store_true", help="Open the Streamlit web UI (recommended)"
     )
     modes.add_argument(
         "--tkinter",
         "-t",
         action="store_true",
-        help="Open the desktop application (default)",
+        help="Open the desktop application (Tkinter)",
     )
     modes.add_argument(
         "--cli", "-c", action="store_true", help="Inspect a dataset in the terminal"
@@ -27,13 +27,14 @@ def main():
     parser.add_argument(
         "--task", choices=["auto", "classification", "regression"], default="auto"
     )
-    parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
     try:
-        if args.web:
-            from frontend.web import run_web_app
-
-            run_web_app(port=args.port)
+        if args.streamlit:
+            import subprocess
+            import sys
+            from pathlib import Path
+            streamlit_path = str(Path(__file__).resolve().parent / "frontend" / "streamlit" / "app.py")
+            subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
         elif args.cli:
             from backend.core import DataYabCore
 
@@ -61,6 +62,8 @@ def main():
             "\nUse the assigned environment and install the project requirements first:\n"
             "  conda activate base\n"
             "  python -m pip install -r requirements.txt\n"
+            "\nFor Streamlit UI, also install:\n"
+            "  python -m pip install -r requirements-streamlit.txt\n"
             "\nIf you are using the managed workspace, open the project workspace for the assigned interpreter.\n"
             f"Original error: {type(exc).__name__}: {exc}\n"
         )

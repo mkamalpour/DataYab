@@ -7,7 +7,7 @@ from backend.core import DataYabCore
 @pytest.fixture
 def trained():
     core=DataYabCore()
-    core._set_dataset(pd.DataFrame({'x':np.arange(40),'group':['a','b']*20,'target':[0,1]*20}))
+    core.data_loader._set_dataset(pd.DataFrame({'x':np.arange(40),'group':['a','b']*20,'target':[0,1]*20}))
     core.split_data('target');core.train('Decision Tree')
     return core
 
@@ -34,13 +34,13 @@ def test_failed_cleaning_restores_encoder_metadata_and_log(trained):
 def test_nested_array_load_is_rejected_before_resetting_old_model(trained):
     old_model=trained.model;old_data=trained.df.copy(deep=True)
     with pytest.raises(ValueError,match='Nested'):
-        trained._set_dataset(pd.DataFrame({'nested':[np.array([1,2]),np.array([3,4])]}))
+        trained.data_loader._set_dataset(pd.DataFrame({'nested':[np.array([1,2]),np.array([3,4])]}))
     assert trained.model is old_model
     pd.testing.assert_frame_equal(trained.df,old_data)
 
 
 def test_observations_handle_entirely_missing_numeric_and_target_columns():
-    core=DataYabCore();core._set_dataset(pd.DataFrame({'number':[np.nan]*12,'target':[None]*12}))
+    core=DataYabCore();core.data_loader._set_dataset(pd.DataFrame({'number':[np.nan]*12,'target':[None]*12}))
     core.target_col='target'
     result=core.generate_observations()
     assert result and any('missing' in item.lower() for item in result)
@@ -51,7 +51,7 @@ def test_drop_missing_columns_respects_selection_and_protects_default_target():
     original = pd.DataFrame({'keep': [1., np.nan, np.nan, np.nan],
                              'drop': [2., np.nan, np.nan, np.nan],
                              'target': [0., np.nan, np.nan, np.nan]})
-    core._set_dataset(original)
+    core.data_loader._set_dataset(original)
     core.target_col = 'target'
     core.handle_missing('drop_cols', columns=['drop'])
     pd.testing.assert_frame_equal(core.df, original.drop(columns=['drop']))
@@ -62,7 +62,7 @@ def test_drop_missing_columns_respects_selection_and_protects_default_target():
 
 def test_iterative_missing_strategy_is_usable_without_external_import_setup():
     core = DataYabCore()
-    core._set_dataset(pd.DataFrame({'a': [1., 2., np.nan, 4.], 'b': [2., 4., 6., 8.]}))
+    core.data_loader._set_dataset(pd.DataFrame({'a': [1., 2., np.nan, 4.], 'b': [2., 4., 6., 8.]}))
     result = core.handle_missing('iterative')
     assert result['success'] and not core.df.isna().any().any()
     assert core.df.loc[2, 'a'] == pytest.approx(3., abs=.01)
@@ -71,7 +71,7 @@ def test_iterative_missing_strategy_is_usable_without_external_import_setup():
 
 def test_insights_after_cleaning_infers_categorical_target_without_a_training_split():
     core = DataYabCore()
-    core._set_dataset(pd.DataFrame({'x': [1, 2, 3, 4], 'target': ['a', 'b', 'a', 'b']}))
+    core.data_loader._set_dataset(pd.DataFrame({'x': [1, 2, 3, 4], 'target': ['a', 'b', 'a', 'b']}))
     core.auto_clean(target_col='target')
     assert core.problem_type == ''
     insights = core.generate_insights()
@@ -100,7 +100,7 @@ def test_desktop_blank_numeric_prediction_matches_backend_imputation():
     from types import SimpleNamespace
     from frontend.desktop import PredictTab
     core = DataYabCore()
-    core._set_dataset(pd.DataFrame({'x': np.arange(40), 'target': 100 + np.arange(40)}))
+    core.data_loader._set_dataset(pd.DataFrame({'x': np.arange(40), 'target': 100 + np.arange(40)}))
     core.split_data('target', problem_type='regression')
     core.train('Linear Regression')
     expected = core.predict({'x': ''})
